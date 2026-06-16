@@ -13,3 +13,4 @@ venv\
 !.env.example
 
 BRD\
+data/*.db

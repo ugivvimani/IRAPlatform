@@ -59,6 +59,17 @@ class TestAssessEndpoint:
         })
         assert r.status_code == 200
 
+    def test_assessment_history_endpoint(self, client):
+        client.post("/assess", json={
+            "query": {"company_name": "HistoryCo", "question": "Is HistoryCo safe?"}
+        })
+        r = client.get("/assessments/HistoryCo")
+        assert r.status_code == 200
+        data = r.json()
+        assert isinstance(data, list)
+        assert len(data) >= 1
+        assert data[0]["entity_id"] == "HistoryCo"
+
 
 class TestWatchlistEndpoints:
     def test_add_to_watchlist(self, client):

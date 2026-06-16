@@ -142,3 +142,14 @@ class WatchlistStatus(BaseModel):
     notes: str
     current_risk_rating: RiskRating | None = None
     last_assessed_at: datetime | None = None
+
+
+class AssessmentAuditRecord(BaseModel):
+    assessment_id: int
+    entity_id: str
+    company_name: str
+    question: str
+    risk_rating: RiskRating
+    confidence: ConfidenceLevel
+    requires_manual_review: bool
+    created_at: datetime

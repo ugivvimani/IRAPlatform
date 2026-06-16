@@ -17,6 +17,7 @@ Local runtime settings are loaded from environment variables (or `.env`):
 - `PINECONE_API_KEY`
 - `PINECONE_INDEX`
 - `PINECONE_NAMESPACE`
+- `SQLITE_DB_PATH`
 
 ## Implemented in this scaffold
 
@@ -27,6 +28,10 @@ Local runtime settings are loaded from environment variables (or `.env`):
 - FastAPI endpoints:
   - `GET /health`
   - `POST /assess`
+  - `GET /assessments/{entity_id}`
+  - `POST /watchlist`
+  - `GET /watchlist`
+  - `GET /watchlist/{entity_id}`
 
 ## Quick scenario run
 
