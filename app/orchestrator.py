@@ -35,9 +35,10 @@ class OrchestratorAgent:
         evidence = self.retrieval.retrieve(request.query.company_name, request.evidence)
         self.memory.initialize_working_memory(request.query, evidence)
         historical = self.memory.load_historical_context(entity_id=request.query.company_name, top_k=5)
+        source_reliability = self.memory.load_source_reliability(entity_id=request.query.company_name)
 
         # Observe + Revise: conflict handling.
-        conflict_result = self.conflict.resolve(evidence, historical)
+        conflict_result = self.conflict.resolve(evidence, historical, source_reliability=source_reliability)
 
         # Act: quantitative scoring.
         quant_scores = self.analysis.score(evidence)
@@ -96,12 +97,12 @@ class OrchestratorAgent:
             CalibrationRecord(
                 calibration_id=f"{request.query.company_name}-{now.date()}",
                 entity_id=request.query.company_name,
-                source_name="system",
+                source_name="system_orchestrator",
                 signal_type="assessment_outcome",
                 true_positive=0,
                 false_positive=0,
                 true_negative=1 if rating == RiskRating.SAFE else 0,
-                false_negative=0,
+                false_negative=1 if rating == RiskRating.SAFE and conflict_result.conflict_detected else 0,
                 reliability_score=0.75 if rating != RiskRating.HIGH_RISK else 0.6,
                 updated_at=now,
             )

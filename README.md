@@ -14,14 +14,16 @@ Local runtime settings are loaded from environment variables (or `.env`):
 - `APP_ENV`
 - `APP_HOST`
 - `APP_PORT`
-- `VECTOR_BACKEND` (`chroma` or `pinecone`)
+- `PINECONE_API_KEY`
+- `PINECONE_INDEX`
+- `PINECONE_NAMESPACE`
 
 ## Implemented in this scaffold
 
 - Core contracts for query, evidence, conflict branches, calibration, and output
 - Orchestrator loop skeleton (Think/Act/Observe/Revise/Conclude)
 - Retrieval, memory, conflict-resolution, and analysis agent placeholders
-- Vector store abstraction with configurable backend (`VECTOR_BACKEND=chroma|pinecone`)
+- Pinecone vector-memory adapter (Pinecone-only mode)
 - FastAPI endpoints:
   - `GET /health`
   - `POST /assess`
