@@ -3,17 +3,15 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from app.agents.analysis_forecasting import AnalysisForecastingAgent
+from app.agents.calibration import CalibrationAgent
 from app.agents.conflict_resolution import ConflictResolutionAgent
 from app.agents.memory_manager import MemoryManagerAgent
+from app.agents.output_composer import OutputComposerAgent
 from app.agents.retrieval import RetrievalAgent
 from app.contracts import (
     AssessRequest,
-    AssessmentDecision,
     AssessmentResponse,
-    CalibrationRecord,
-    ConfidenceLevel,
     MemoryFact,
-    RiskRating,
 )
 
 
@@ -24,11 +22,15 @@ class OrchestratorAgent:
         analysis: AnalysisForecastingAgent,
         conflict: ConflictResolutionAgent,
         memory: MemoryManagerAgent,
+        composer: OutputComposerAgent,
+        calibration: CalibrationAgent,
     ) -> None:
         self.retrieval = retrieval
         self.analysis = analysis
         self.conflict = conflict
         self.memory = memory
+        self.composer = composer
+        self.calibration = calibration
 
     def assess(self, request: AssessRequest) -> AssessmentResponse:
         # Think: initialize context and gather prior memory.
@@ -43,40 +45,7 @@ class OrchestratorAgent:
         # Act: quantitative scoring.
         quant_scores = self.analysis.score(evidence)
         quant = quant_scores["composite_quant_score"]
-
-        rating = RiskRating.SAFE
-        confidence = ConfidenceLevel.HIGH
-        requires_manual_review = False
-        summary = "No critical red flags identified from current evidence."
-        next_steps = ["Continue monitoring with periodic reassessment."]
-
-        if conflict_result.conflict_detected and conflict_result.winner:
-            requires_manual_review = conflict_result.requires_manual_review
-            confidence = conflict_result.winner.confidence
-            summary = (
-                f"Conflicting signals detected; primary branch selected: "
-                f"{conflict_result.winner.interpretation}."
-            )
-            next_steps = conflict_result.winner.proposed_actions
-
-        if quant >= 0.65:
-            rating = RiskRating.HIGH_RISK
-            confidence = ConfidenceLevel.MEDIUM if confidence == ConfidenceLevel.HIGH else confidence
-            summary = "Quantitative indicators point to elevated risk."
-            next_steps.append("Escalate to compliance review.")
-        elif quant >= 0.35 or conflict_result.conflict_detected:
-            rating = RiskRating.WATCH
-
-        if requires_manual_review:
-            next_steps.append("Manual analyst review required before final decision.")
-
-        decision = AssessmentDecision(
-            risk_rating=rating,
-            confidence=confidence,
-            summary=summary,
-            recommended_next_steps=next_steps,
-            requires_manual_review=requires_manual_review,
-        )
+        decision = self.composer.compose(evidence, conflict_result, quant_score=quant)
 
         # Conclude: persist stable memory and calibration artifacts.
         now = datetime.now(timezone.utc)
@@ -94,17 +63,12 @@ class OrchestratorAgent:
         ]
         self.memory.persist_facts(stable_facts)
         self.memory.persist_calibration(
-            CalibrationRecord(
-                calibration_id=f"{request.query.company_name}-{now.date()}",
+            self.calibration.build_record(
                 entity_id=request.query.company_name,
                 source_name="system_orchestrator",
-                signal_type="assessment_outcome",
-                true_positive=0,
-                false_positive=0,
-                true_negative=1 if rating == RiskRating.SAFE else 0,
-                false_negative=1 if rating == RiskRating.SAFE and conflict_result.conflict_detected else 0,
-                reliability_score=0.75 if rating != RiskRating.HIGH_RISK else 0.6,
-                updated_at=now,
+                decision=decision,
+                conflict_result=conflict_result,
+                evidence=evidence,
             )
         )
 
@@ -113,5 +77,9 @@ class OrchestratorAgent:
             decision=decision,
             evidence_chain=evidence,
             conflict_result=conflict_result if conflict_result.conflict_detected else None,
-            model_metadata={"quant_scores": quant_scores, "memory_records_written": len(stable_facts)},
+            model_metadata={
+                "quant_scores": quant_scores,
+                "memory_records_written": len(stable_facts),
+                "evaluated_at": now.isoformat(),
+            },
         )

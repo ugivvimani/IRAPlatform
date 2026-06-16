@@ -127,3 +127,18 @@ class AssessmentResponse(BaseModel):
 class AssessRequest(BaseModel):
     query: UserQuery
     evidence: list[EvidenceItem] = Field(default_factory=list)
+
+
+class WatchlistEntry(BaseModel):
+    entity_id: str
+    company_name: str
+    added_at: datetime = Field(default_factory=lambda: __import__("datetime").datetime.now(__import__("datetime").timezone.utc))
+    notes: str = ""
+
+
+class WatchlistStatus(BaseModel):
+    entity_id: str
+    company_name: str
+    notes: str
+    current_risk_rating: RiskRating | None = None
+    last_assessed_at: datetime | None = None
