@@ -13,6 +13,8 @@ class AppSettings:
     pinecone_api_key: str
     pinecone_index: str
     pinecone_namespace: str
+    db_backend: str
+    postgres_dsn: str
     sqlite_db_path: str
 
 
@@ -25,5 +27,7 @@ def load_settings() -> AppSettings:
         pinecone_api_key=os.getenv("PINECONE_API_KEY", ""),
         pinecone_index=os.getenv("PINECONE_INDEX", "ira-platform-memory"),
         pinecone_namespace=os.getenv("PINECONE_NAMESPACE", "default"),
+        db_backend=os.getenv("DB_BACKEND", "sqlite"),
+        postgres_dsn=os.getenv("POSTGRES_DSN", ""),
         sqlite_db_path=os.getenv("SQLITE_DB_PATH", "data/ira_platform.db"),
     )

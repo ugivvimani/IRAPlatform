@@ -21,7 +21,7 @@ from app.contracts import (
 from app.llm.factory import build_llm_client
 from app.orchestrator import OrchestratorAgent
 from app.settings import load_settings
-from app.storage.sqlite_repo import SQLiteRepository
+from app.storage.factory import build_storage_repository
 from app.vector_store.factory import build_vector_store
 
 app = FastAPI(title="Integrity Risk Assessment Agent", version="0.2.0")
@@ -30,7 +30,7 @@ settings = load_settings()
 vector_store = build_vector_store()
 memory_agent = MemoryManagerAgent(vector_store)
 llm_client = build_llm_client()
-sqlite_repo = SQLiteRepository(settings.sqlite_db_path)
+storage_repo = build_storage_repository(settings)
 orchestrator = OrchestratorAgent(
     retrieval=RetrievalAgent(),
     analysis=AnalysisForecastingAgent(),
@@ -47,13 +47,13 @@ def health() -> dict[str, str]:
         "env": settings.app_env,
         "vector_backend": settings.vector_backend,
         "llm_backend": type(llm_client).__name__,
-        "sqlite_db_path": settings.sqlite_db_path,
+        "storage_backend": settings.db_backend,
     }
 
 
 def _assess_and_store(request: AssessRequest) -> AssessmentResponse:
     result = orchestrator.assess(request)
-    sqlite_repo.insert_assessment(result)
+    storage_repo.insert_assessment(result)
     return result
 
 
@@ -64,12 +64,12 @@ def assess(request: AssessRequest) -> AssessmentResponse:
 
 @app.post("/watchlist", response_model=WatchlistEntry, status_code=201)
 def add_to_watchlist(entry: WatchlistEntry) -> WatchlistEntry:
-    return sqlite_repo.upsert_watchlist(entry)
+    return storage_repo.upsert_watchlist(entry)
 
 
 @app.get("/watchlist/{entity_id}", response_model=WatchlistStatus)
 def get_watchlist_status(entity_id: str) -> WatchlistStatus:
-    entry = sqlite_repo.get_watchlist(entity_id)
+    entry = storage_repo.get_watchlist(entity_id)
     if not entry:
         raise HTTPException(status_code=404, detail=f"Entity '{entity_id}' not on watchlist.")
     result = _assess_and_store(
@@ -86,9 +86,9 @@ def get_watchlist_status(entity_id: str) -> WatchlistStatus:
 
 @app.get("/watchlist", response_model=list[WatchlistEntry])
 def list_watchlist() -> list[WatchlistEntry]:
-    return sqlite_repo.list_watchlist()
+    return storage_repo.list_watchlist()
 
 
 @app.get("/assessments/{entity_id}", response_model=list[AssessmentAuditRecord])
 def list_assessments(entity_id: str, limit: int = 25) -> list[AssessmentAuditRecord]:
-    return sqlite_repo.list_assessments(entity_id=entity_id, limit=limit)
+    return storage_repo.list_assessments(entity_id=entity_id, limit=limit)

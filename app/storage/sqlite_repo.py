@@ -5,9 +5,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.contracts import AssessmentAuditRecord, AssessmentResponse, WatchlistEntry
+from app.storage.base import StorageRepository
 
 
-class SQLiteRepository:
+class SQLiteRepository(StorageRepository):
     def __init__(self, db_path: str) -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)

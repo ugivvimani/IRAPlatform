@@ -17,6 +17,8 @@ Local runtime settings are loaded from environment variables (or `.env`):
 - `PINECONE_API_KEY`
 - `PINECONE_INDEX`
 - `PINECONE_NAMESPACE`
+- `DB_BACKEND` (`sqlite` or `postgres`)
+- `POSTGRES_DSN` (required when `DB_BACKEND=postgres`)
 - `SQLITE_DB_PATH`
 
 ## Implemented in this scaffold
