@@ -6,8 +6,15 @@ Initial implementation scaffold for the phased BRD plan.
 
 ```powershell
 pip install -r requirements.txt
-uvicorn app.main:app --reload
+Copy-Item .env.example .env
+python run_local.py
 ```
+
+Local runtime settings are loaded from environment variables (or `.env`):
+- `APP_ENV`
+- `APP_HOST`
+- `APP_PORT`
+- `VECTOR_BACKEND` (`chroma` or `pinecone`)
 
 ## Implemented in this scaffold
 

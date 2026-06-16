@@ -8,9 +8,11 @@ from app.agents.memory_manager import MemoryManagerAgent
 from app.agents.retrieval import RetrievalAgent
 from app.contracts import AssessRequest, AssessmentResponse
 from app.orchestrator import OrchestratorAgent
+from app.settings import load_settings
 from app.vector_store.factory import build_vector_store
 
 app = FastAPI(title="Integrity Risk Assessment Agent", version="0.1.0")
+settings = load_settings()
 
 vector_store = build_vector_store()
 memory_agent = MemoryManagerAgent(vector_store)
@@ -24,7 +26,11 @@ orchestrator = OrchestratorAgent(
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "env": settings.app_env,
+        "vector_backend": settings.vector_backend,
+    }
 
 
 @app.post("/assess", response_model=AssessmentResponse)
