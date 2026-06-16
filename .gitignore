@@ -2,3 +2,14 @@ __pycache__\
 *.py[cod]
 .venv\
 .pytest_cache\
+*.pyo
+*.pyd
+
+venv\
+.python-version.local
+
+.env
+.env.*
+!.env.example
+
+BRD\
