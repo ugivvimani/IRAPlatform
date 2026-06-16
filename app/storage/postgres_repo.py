@@ -86,6 +86,17 @@ class PostgresRepository(StorageRepository):
                 )
                 rows = cur.fetchall()
         return [WatchlistEntry(entity_id=r[0], company_name=r[1], notes=r[2], added_at=r[3]) for r in rows]
+    
+    def delete_watchlist(self, entity_id: str) -> bool:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM watchlist_entries WHERE entity_id = %s",
+                    (entity_id,),
+                )
+                rowcount = cur.rowcount
+            conn.commit()
+        return rowcount > 0
 
     def insert_assessment(self, response: AssessmentResponse) -> int:
         with self._connect() as conn:

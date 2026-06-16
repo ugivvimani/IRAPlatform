@@ -94,6 +94,14 @@ class SQLiteRepository(StorageRepository):
             )
             for row in rows
         ]
+    
+    def delete_watchlist(self, entity_id: str) -> bool:
+        with self._connect() as conn:
+            cur = conn.execute(
+                "DELETE FROM watchlist_entries WHERE entity_id = ?",
+                (entity_id,),
+            )
+            return cur.rowcount > 0
 
     def insert_assessment(self, response: AssessmentResponse) -> int:
         with self._connect() as conn:

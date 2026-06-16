@@ -17,6 +17,10 @@ class StorageRepository(ABC):
     @abstractmethod
     def list_watchlist(self) -> list[WatchlistEntry]:
         raise NotImplementedError
+    
+    @abstractmethod
+    def delete_watchlist(self, entity_id: str) -> bool:
+        raise NotImplementedError
 
     @abstractmethod
     def insert_assessment(self, response: AssessmentResponse) -> int:

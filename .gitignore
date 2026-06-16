@@ -13,4 +13,45 @@ venv\
 !.env.example
 
 BRD\
+BRD-backup\
+brd_text\
+*.pdf
+*.docx
+
 data/*.db
+*.db
+*.sqlite
+*.sqlite3
+
+logs\
+*.log
+
+# IDE
+.vscode\
+.idea\
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Build & dist
+build\
+dist\
+*.egg-info\
+
+# Testing
+.coverage
+htmlcov\
+.tox\
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Docker volumes
+postgres_data\
+redis_data\
+prometheus_data\
+grafana_data\
+ira_data\
+

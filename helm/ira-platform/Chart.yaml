@@ -1,0 +1,17 @@
+apiVersion: v2
+name: ira-platform
+description: Integrity Risk Assessment Agent Platform
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - ira
+  - risk-assessment
+  - integrity
+  - compliance
+home: https://github.com/ugivvimani/IRAPlatform
+sources:
+  - https://github.com/ugivvimani/IRAPlatform
+maintainers:
+  - name: IRA Team
+    email: team@example.com
