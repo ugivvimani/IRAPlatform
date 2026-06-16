@@ -1,9 +1,10 @@
 __pycache__\
 *.py[cod]
+.venv\
+.pytest_cache\
 *.pyo
 *.pyd
 
-.venv\
 venv\
 .python-version.local
 
