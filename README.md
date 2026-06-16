@@ -33,3 +33,9 @@ Local runtime settings are loaded from environment variables (or `.env`):
 ```powershell
 python scripts\run_scenarios.py
 ```
+
+## Evaluation suite
+
+```powershell
+python scripts\evaluate_suite.py
+```

@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from app.agents.analysis_forecasting import AnalysisForecastingAgent
+from app.agents.calibration import CalibrationAgent
 from app.agents.conflict_resolution import ConflictResolutionAgent
 from app.agents.memory_manager import MemoryManagerAgent
 from app.agents.output_composer import OutputComposerAgent
@@ -23,6 +24,7 @@ orchestrator = OrchestratorAgent(
     conflict=ConflictResolutionAgent(),
     memory=memory_agent,
     composer=OutputComposerAgent(),
+    calibration=CalibrationAgent(),
 )
 
 

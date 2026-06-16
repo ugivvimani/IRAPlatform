@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from app.agents.analysis_forecasting import AnalysisForecastingAgent
+from app.agents.calibration import CalibrationAgent
 from app.agents.conflict_resolution import ConflictResolutionAgent
 from app.agents.memory_manager import MemoryManagerAgent
 from app.agents.output_composer import OutputComposerAgent
@@ -10,7 +11,6 @@ from app.agents.retrieval import RetrievalAgent
 from app.contracts import (
     AssessRequest,
     AssessmentResponse,
-    CalibrationRecord,
     MemoryFact,
 )
 
@@ -23,12 +23,14 @@ class OrchestratorAgent:
         conflict: ConflictResolutionAgent,
         memory: MemoryManagerAgent,
         composer: OutputComposerAgent,
+        calibration: CalibrationAgent,
     ) -> None:
         self.retrieval = retrieval
         self.analysis = analysis
         self.conflict = conflict
         self.memory = memory
         self.composer = composer
+        self.calibration = calibration
 
     def assess(self, request: AssessRequest) -> AssessmentResponse:
         # Think: initialize context and gather prior memory.
@@ -61,17 +63,12 @@ class OrchestratorAgent:
         ]
         self.memory.persist_facts(stable_facts)
         self.memory.persist_calibration(
-            CalibrationRecord(
-                calibration_id=f"{request.query.company_name}-{now.date()}",
+            self.calibration.build_record(
                 entity_id=request.query.company_name,
                 source_name="system_orchestrator",
-                signal_type="assessment_outcome",
-                true_positive=1 if decision.risk_rating.value in {"watch", "high_risk", "restricted"} and conflict_result.conflict_detected else 0,
-                false_positive=1 if decision.risk_rating.value in {"watch", "high_risk", "restricted"} and not conflict_result.conflict_detected else 0,
-                true_negative=1 if decision.risk_rating.value == "safe" and not conflict_result.conflict_detected else 0,
-                false_negative=1 if decision.risk_rating.value == "safe" and conflict_result.conflict_detected else 0,
-                reliability_score=0.65 if decision.requires_manual_review else 0.8,
-                updated_at=now,
+                decision=decision,
+                conflict_result=conflict_result,
+                evidence=evidence,
             )
         )
 
@@ -80,5 +77,9 @@ class OrchestratorAgent:
             decision=decision,
             evidence_chain=evidence,
             conflict_result=conflict_result if conflict_result.conflict_detected else None,
-            model_metadata={"quant_scores": quant_scores, "memory_records_written": len(stable_facts)},
+            model_metadata={
+                "quant_scores": quant_scores,
+                "memory_records_written": len(stable_facts),
+                "evaluated_at": now.isoformat(),
+            },
         )
