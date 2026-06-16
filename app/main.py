@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from app.agents.analysis_forecasting import AnalysisForecastingAgent
 from app.agents.conflict_resolution import ConflictResolutionAgent
 from app.agents.memory_manager import MemoryManagerAgent
+from app.agents.output_composer import OutputComposerAgent
 from app.agents.retrieval import RetrievalAgent
 from app.contracts import AssessRequest, AssessmentResponse
 from app.orchestrator import OrchestratorAgent
@@ -21,6 +22,7 @@ orchestrator = OrchestratorAgent(
     analysis=AnalysisForecastingAgent(),
     conflict=ConflictResolutionAgent(),
     memory=memory_agent,
+    composer=OutputComposerAgent(),
 )
 
 

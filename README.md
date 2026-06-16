@@ -22,8 +22,14 @@ Local runtime settings are loaded from environment variables (or `.env`):
 
 - Core contracts for query, evidence, conflict branches, calibration, and output
 - Orchestrator loop skeleton (Think/Act/Observe/Revise/Conclude)
-- Retrieval, memory, conflict-resolution, and analysis agent placeholders
+- Retrieval, memory, conflict-resolution, analysis, and output-composer agents
 - Pinecone vector-memory adapter (Pinecone-only mode)
 - FastAPI endpoints:
   - `GET /health`
   - `POST /assess`
+
+## Quick scenario run
+
+```powershell
+python scripts\run_scenarios.py
+```
