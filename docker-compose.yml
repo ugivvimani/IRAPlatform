@@ -1,7 +1,6 @@
-version: "3.9"
+﻿version: "3.9"
 
 services:
-  # PostgreSQL Database
   postgres:
     image: postgres:16-alpine
     container_name: ira-postgres
@@ -18,26 +17,18 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    networks:
-      - ira-network
 
-  # Redis for caching and task queues
-  redis:
-    image: redis:7-alpine
-    container_name: ira-redis
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite
+    container_name: ira-azurite
+    command: azurite --blobHost 0.0.0.0 --queueHost 0.0.0.0
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "10000:10000"
+      - "10001:10001"
+      - "10002:10002"
     volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - ira-network
+      - azurite_data:/data
 
-  # IRA Agent API
   api:
     build:
       context: .
@@ -47,92 +38,65 @@ services:
       DB_BACKEND: ${DB_BACKEND:-postgres}
       POSTGRES_DSN: postgresql://${DB_USER:-ira_user}:${DB_PASSWORD:-ira_password}@postgres:5432/${DB_NAME:-ira_db}
       SQLITE_DB_PATH: /data/ira.db
+      APPLICATIONINSIGHTS_CONNECTION_STRING: ${APPLICATIONINSIGHTS_CONNECTION_STRING:-}
+      AZURE_KEY_VAULT_URL: ${AZURE_KEY_VAULT_URL:-}
+      AZURE_STORAGE_CONNECTION_STRING: ${AZURE_STORAGE_CONNECTION_STRING:-UseDevelopmentStorage=true}
+      AZURE_WEBJOBS_ASSESSMENT_QUEUE: ${AZURE_WEBJOBS_ASSESSMENT_QUEUE:-assessment-jobs}
       PINECONE_API_KEY: ${PINECONE_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      NEWS_API_KEY: ${NEWS_API_KEY:-}
-      ESG_API_KEY: ${ESG_API_KEY:-}
-      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       LOG_FORMAT: ${LOG_FORMAT:-json}
-      REDIS_URL: redis://redis:6379
     ports:
       - "${APP_PORT:-8000}:8000"
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_healthy
+      azurite:
+        condition: service_started
     volumes:
       - ./logs:/app/logs
       - ira_data:/data
-    networks:
-      - ira-network
     restart: unless-stopped
 
-  # Celery Worker for background tasks
-  worker:
+  webjob-continuous:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: ira-worker
-    command: celery -A app.tasks worker --loglevel=info
+    container_name: ira-webjob-continuous
+    command: python webjobs/continuous/run.py
     environment:
       DB_BACKEND: ${DB_BACKEND:-postgres}
       POSTGRES_DSN: postgresql://${DB_USER:-ira_user}:${DB_PASSWORD:-ira_password}@postgres:5432/${DB_NAME:-ira_db}
-      REDIS_URL: redis://redis:6379
+      AZURE_STORAGE_CONNECTION_STRING: ${AZURE_STORAGE_CONNECTION_STRING:-UseDevelopmentStorage=true}
+      AZURE_WEBJOBS_ASSESSMENT_QUEUE: ${AZURE_WEBJOBS_ASSESSMENT_QUEUE:-assessment-jobs}
       PINECONE_API_KEY: ${PINECONE_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
-      - postgres
-      - redis
-    volumes:
-      - ./logs:/app/logs
-    networks:
-      - ira-network
+      postgres:
+        condition: service_healthy
+      azurite:
+        condition: service_started
     restart: unless-stopped
 
-  # Prometheus for metrics
-  prometheus:
-    image: prom/prometheus:latest
-    container_name: ira-prometheus
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus_data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-    networks:
-      - ira-network
-    restart: unless-stopped
-
-  # Grafana for visualization
-  grafana:
-    image: grafana/grafana:latest
-    container_name: ira-grafana
-    ports:
-      - "3000:3000"
+  webjob-scheduled:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ira-webjob-scheduled
+    command: sh -c "while true; do python webjobs/scheduled/run.py; sleep 3600; done"
     environment:
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
-      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+      DB_BACKEND: ${DB_BACKEND:-postgres}
+      POSTGRES_DSN: postgresql://${DB_USER:-ira_user}:${DB_PASSWORD:-ira_password}@postgres:5432/${DB_NAME:-ira_db}
+      PINECONE_API_KEY: ${PINECONE_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
-      - prometheus
-    networks:
-      - ira-network
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
   postgres_data:
-  redis_data:
   ira_data:
-  prometheus_data:
-  grafana_data:
-
-networks:
-  ira-network:
-    driver: bridge
+  azurite_data:

@@ -6,6 +6,7 @@ import pytest
 
 from app.contracts import (
     AssessRequest,
+    CalibrationRecord,
     CriticScoreVector,
     EvidenceItem,
     RiskDimension,
@@ -220,6 +221,24 @@ class TestCalibration:
         r_clean = agent.build_record("TestCo", "s", decision_clean, conflict, [])
         assert r_mr.reliability_score < r_clean.reliability_score
 
+    def test_sparse_evidence_keeps_calibration_uncertain(self):
+        from app.contracts import AssessmentDecision, ConflictResolutionResult, RiskRating, ConfidenceLevel
+        agent = CalibrationAgent()
+        decision = AssessmentDecision(
+            risk_rating=RiskRating.WATCH,
+            confidence=ConfidenceLevel.MEDIUM,
+            summary="watch",
+            recommended_next_steps=[],
+            requires_manual_review=True,
+        )
+        conflict = ConflictResolutionResult(conflict_detected=True, rationale="conflict")
+        sparse_evidence = [
+            _ev("sp1", RiskDimension.SANCTIONS, "sanctions_status", "reported_sanctioned", "SingleSource", "secondary", 0.55)
+        ]
+        record = agent.build_record("SparseCo", "single_source", decision, conflict, sparse_evidence)
+        assert record.uncertainty_score > 0.6
+        assert 0.45 <= record.reliability_score <= 0.65
+
 
 # ── orchestrator integration ──────────────────────────────────────────────────
 
@@ -257,3 +276,25 @@ class TestOrchestratorIntegration:
         orchestrator_instance.assess(req)
         history = orchestrator_instance.memory.load_historical_context("MemCo", top_k=5)
         assert len(history) > 0
+
+    def test_source_reliability_shrinks_for_low_sample_size(self):
+        vs = PineconeVectorStore()
+        mem = MemoryManagerAgent(vs)
+        rec = CalibrationRecord(
+            calibration_id="cal-1",
+            entity_id="EntityA",
+            source_name="LowSampleSource",
+            signal_type="assessment_outcome",
+            true_positive=1,
+            false_positive=0,
+            true_negative=0,
+            false_negative=0,
+            total_outcomes=1,
+            effective_sample_size=0.1,
+            uncertainty_score=1.0,
+            reliability_score=1.0,
+            updated_at=datetime.now(timezone.utc),
+        )
+        mem.persist_calibration(rec)
+        reliabilities = mem.load_source_reliability("EntityA")
+        assert 0.49 <= reliabilities["LowSampleSource"] <= 0.6

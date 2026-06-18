@@ -72,11 +72,19 @@ class MemoryManagerAgent:
             record.false_positive += int(previous.get("false_positive", 0))
             record.true_negative += int(previous.get("true_negative", 0))
             record.false_negative += int(previous.get("false_negative", 0))
-            # Beta-smoothed reliability to reduce volatility under sparse outcomes.
-            record.reliability_score = (
-                (record.true_positive + record.true_negative + 1)
-                / (record.true_positive + record.true_negative + record.false_positive + record.false_negative + 2)
-            )
+            record.effective_sample_size += float(previous.get("effective_sample_size", 0.0))
+
+        total_outcomes = record.true_positive + record.true_negative + record.false_positive + record.false_negative
+        record.total_outcomes = total_outcomes
+        if total_outcomes > 0 and record.effective_sample_size > 0:
+            normalized_weight = record.effective_sample_size / total_outcomes
+            weighted_success = (record.true_positive + record.true_negative) * normalized_weight
+            weighted_failures = (record.false_positive + record.false_negative) * normalized_weight
+            record.reliability_score = (1.0 + weighted_success) / (2.0 + weighted_success + weighted_failures)
+            record.uncertainty_score = 1.0 / (1.0 + weighted_success + weighted_failures)
+        else:
+            record.reliability_score = 0.5
+            record.uncertainty_score = 1.0
 
         self.vector_store.upsert(
             namespace="calibration",
@@ -97,9 +105,14 @@ class MemoryManagerAgent:
             metadata_filter={"entity_id": entity_id},
         )
         by_source: dict[str, float] = {}
+        prior_strength = 3.0
         for doc in docs:
             source_name = str(doc.metadata.get("source_name", "")).strip()
             if not source_name:
                 continue
-            by_source[source_name] = float(doc.metadata.get("reliability_score", 0.5))
+            reliability = float(doc.metadata.get("reliability_score", 0.5))
+            sample_size = float(doc.metadata.get("effective_sample_size", 0.0))
+            by_source[source_name] = (
+                (reliability * sample_size + 0.5 * prior_strength) / (sample_size + prior_strength)
+            )
         return by_source

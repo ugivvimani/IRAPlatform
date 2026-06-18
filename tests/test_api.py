@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from datetime import datetime, timezone
 
@@ -100,3 +100,28 @@ class TestWatchlistEndpoints:
         r = client.get("/watchlist")
         assert r.status_code == 200
         assert isinstance(r.json(), list)
+
+
+class TestAsyncAssessEndpoint:
+    def test_assess_async_returns_task(self, client):
+        r = client.post("/assess/async", json={
+            "company_name": "AsyncCo",
+            "question": "Is AsyncCo safe?",
+        })
+        assert r.status_code == 200
+        data = r.json()
+        assert "task_id" in data
+        assert data["status"] == "queued"
+
+    def test_task_status_endpoint(self, client):
+        queued = client.post("/assess/async", json={
+            "company_name": "AsyncStatusCo",
+            "question": "Status check",
+        })
+        task_id = queued.json()["task_id"]
+
+        r = client.get(f"/tasks/{task_id}")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["task_id"] == task_id
+        assert "status" in data

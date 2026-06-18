@@ -1,4 +1,4 @@
-fastapi==0.116.1
+﻿fastapi==0.116.1
 uvicorn==0.35.0
 pydantic==2.13.4
 httpx>=0.27.0
@@ -9,7 +9,7 @@ psycopg[binary]>=3.2
 # External data connectors
 aiohttp>=3.10
 beautifulsoup4>=4.12
-feedparser>=6.1
+feedparser>=6.0.2,<7
 
 # Real embeddings
 openai>=1.3.0
@@ -24,21 +24,23 @@ passlib>=1.7.4
 python-multipart>=0.0.6
 PyJWT>=2.8.0
 
-# Observability
+# Azure observability + hosting integrations
 opentelemetry-api>=1.20
 opentelemetry-sdk>=1.20
-opentelemetry-exporter-prometheus>=0.41b0
-prometheus-client>=0.20
-opentelemetry-instrumentation-fastapi>=0.41b0
-opentelemetry-instrumentation-sqlalchemy>=0.41b0
-opentelemetry-instrumentation-httpx>=0.41b0
-
-# Background jobs
-celery>=5.3
-redis>=5.0
+azure-monitor-opentelemetry>=1.6.0
+azure-identity>=1.17.1
+azure-keyvault-secrets>=4.8.0
+azure-storage-queue>=12.10.0
 
 # Database migrations
 alembic>=1.13
 
-# API documentation
-python-multipart>=0.0.6
+# CLI management
+click>=8.1
+
+# Logging
+python-json-logger>=2.0
+
+
+
+

@@ -8,12 +8,10 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from typing import Optional
 import logging
+from uuid import uuid4
 
-import aiohttp
 import httpx
-from bs4 import BeautifulSoup
-
-from app.contracts import EvidenceItem, RiskDimension
+from app.contracts import EvidenceItem, RiskDimension, SourceTier
 
 logger = logging.getLogger(__name__)
 
@@ -115,10 +113,11 @@ class OFACConnector(BaseConnector):
                 if "sdnList" in data:
                     for sdn in data["sdnList"]:
                         evidence.append(EvidenceItem(
+                            evidence_id=f"ofac-{uuid4().hex}",
                             signal="sanctions_listed",
                             value="yes",
                             source_name="OFAC",
-                            source_tier=self.source_tier,
+                            source_tier=SourceTier.OFFICIAL,
                             dimension=RiskDimension.SANCTIONS,
                             timestamp=datetime.now(timezone.utc),
                             entity_match_confidence=0.95,
@@ -133,10 +132,11 @@ class OFACConnector(BaseConnector):
                 else:
                     # No match = not sanctioned
                     evidence.append(EvidenceItem(
+                        evidence_id=f"ofac-{uuid4().hex}",
                         signal="sanctions_status",
                         value="not_sanctioned",
                         source_name="OFAC",
-                        source_tier=self.source_tier,
+                        source_tier=SourceTier.OFFICIAL,
                         dimension=RiskDimension.SANCTIONS,
                         timestamp=datetime.now(timezone.utc),
                         entity_match_confidence=0.92,
@@ -184,10 +184,11 @@ class SECConnector(BaseConnector):
                 data = response.json()
                 if "hits" in data and data["hits"] > 0:
                     evidence.append(EvidenceItem(
+                        evidence_id=f"sec-{uuid4().hex}",
                         signal="sec_filings_found",
                         value=f"{data['hits']}",
                         source_name="SEC Edgar",
-                        source_tier=self.source_tier,
+                        source_tier=SourceTier.REGULATOR,
                         dimension=RiskDimension.REGULATORY,
                         timestamp=datetime.now(timezone.utc),
                         entity_match_confidence=0.94,
@@ -215,10 +216,11 @@ class SECConnector(BaseConnector):
                     enforcement_data = enforcement_response.json()
                     if enforcement_data.get("hits", 0) > 0:
                         evidence.append(EvidenceItem(
+                            evidence_id=f"sec-{uuid4().hex}",
                             signal="regulatory_filings_unusual",
                             value=f"{enforcement_data['hits']}",
                             source_name="SEC Edgar",
-                            source_tier=self.source_tier,
+                            source_tier=SourceTier.REGULATOR,
                             dimension=RiskDimension.REGULATORY,
                             timestamp=datetime.now(timezone.utc),
                             entity_match_confidence=0.85,
@@ -271,10 +273,11 @@ class NewsConnector(BaseConnector):
                         # Sentiment-based signal
                         sentiment = self._analyze_sentiment(article.get("description", ""))
                         evidence.append(EvidenceItem(
+                            evidence_id=f"news-{uuid4().hex}",
                             signal="news_sentiment",
                             value=sentiment,
                             source_name=article.get("source", {}).get("name", "News"),
-                            source_tier=self.source_tier,
+                            source_tier=SourceTier.TIER1_NEWS,
                             dimension=RiskDimension.REPUTATIONAL,
                             timestamp=datetime.fromisoformat(article["publishedAt"].replace("Z", "+00:00")),
                             entity_match_confidence=0.88,
@@ -345,10 +348,11 @@ class ESGConnector(BaseConnector):
                     esg_risk = "high" if score < 30 else "medium" if score < 60 else "low"
                     
                     evidence.append(EvidenceItem(
+                        evidence_id=f"esg-{uuid4().hex}",
                         signal="esg_rating",
                         value=str(score),
                         source_name="Sustainalytics",
-                        source_tier=self.source_tier,
+                        source_tier=SourceTier.SECONDARY,
                         dimension=RiskDimension.ESG,
                         timestamp=datetime.now(timezone.utc),
                         entity_match_confidence=0.91,

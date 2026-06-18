@@ -104,6 +104,9 @@ class CalibrationRecord(BaseModel):
     false_positive: int = 0
     true_negative: int = 0
     false_negative: int = 0
+    total_outcomes: int = 0
+    effective_sample_size: float = Field(default=0.0, ge=0.0)
+    uncertainty_score: float = Field(default=1.0, ge=0.0, le=1.0)
     reliability_score: float = Field(ge=0.0, le=1.0)
     updated_at: datetime
 

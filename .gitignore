@@ -1,57 +1,60 @@
-__pycache__\
+__pycache__/
 *.py[cod]
-.venv\
-.pytest_cache\
 *.pyo
 *.pyd
 
-venv\
+# Virtual environments
+.venv/
+venv/
+env/
+.ipenv/
 .python-version.local
 
+# Environment files
 .env
 .env.*
 !.env.example
 
-BRD\
-BRD-backup\
-brd_text\
+# BRD artifacts
+BRD/
+BRD-backup/
+brd_text/
 *.pdf
 *.docx
 
+# Local databases
 data/*.db
 *.db
 *.sqlite
 *.sqlite3
 
-logs\
+# Logs
+logs/
 *.log
 
 # IDE
-.vscode\
-.idea\
+.vscode/
+.idea/
 *.swp
 *.swo
 *~
-.DS_Store
 
 # Build & dist
-build\
-dist\
-*.egg-info\
+build/
+dist/
+*.egg-info/
 
 # Testing
 .coverage
-htmlcov\
-.tox\
+htmlcov/
+.pytest_cache/
+.tox/
 
 # OS
 Thumbs.db
 .DS_Store
 
 # Docker volumes
-postgres_data\
-redis_data\
-prometheus_data\
-grafana_data\
-ira_data\
-
+postgres_data/
+ira_data/
+azurite_data/

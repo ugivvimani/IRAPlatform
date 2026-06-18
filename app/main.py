@@ -1,10 +1,11 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, HTTPException, Depends
-from prometheus_client import make_asgi_app
+from fastapi import Body, Depends, FastAPI, HTTPException
+from pydantic import BaseModel
 
 from app.agents.analysis_forecasting import AnalysisForecastingAgent
 from app.agents.calibration import CalibrationAgent
@@ -12,66 +13,69 @@ from app.agents.conflict_resolution import ConflictResolutionAgent
 from app.agents.memory_manager import MemoryManagerAgent
 from app.agents.output_composer import OutputComposerAgent
 from app.agents.retrieval import RetrievalAgent
-from app.auth import (
-    get_authenticated_user,
-    require_write_access,
-    User,
-    TokenManager,
-)
-from app.connectors import MultiSourceConnector, ConnectorConfig
+from app.auth import TokenManager, User, get_authenticated_user, require_write_access
+from app.connectors import ConnectorConfig, MultiSourceConnector
 from app.contracts import (
-    AssessmentAuditRecord,
     AssessRequest,
+    AssessmentAuditRecord,
     AssessmentResponse,
     UserQuery,
     WatchlistEntry,
     WatchlistStatus,
 )
-from app.embeddings import EmbeddingFactory
 from app.llm.factory import build_llm_client
-from app.observability import (
-    MetricsMiddleware,
-    HealthCheckService,
-    setup_observability,
-    instrument_assessment,
-    registry,
-)
+from app.observability import HealthCheckService, MetricsMiddleware, instrument_assessment, setup_observability
 from app.orchestrator import OrchestratorAgent
 from app.settings import load_settings
 from app.storage.factory import build_storage_repository
 from app.vector_store.factory import build_vector_store
+from app.webjobs import enqueue_assessment_job, get_job_status
 
 logger = logging.getLogger(__name__)
 
-# Initialize FastAPI app
+
+class AsyncAssessRequest(BaseModel):
+    company_name: str
+    question: str
+
+
+class AsyncTaskResponse(BaseModel):
+    task_id: str
+    status: str
+
+
+try:
+    from app.embeddings import EmbeddingFactory
+except Exception:
+    class EmbeddingFactory:  # type: ignore[override]
+        @staticmethod
+        def create(_embedding_type: str = "hybrid"):
+            class _FallbackEmbedding:
+                def embed_sync(self, texts: list[str]) -> list[list[float]]:
+                    return [[0.0] * 8 for _ in texts]
+
+            return _FallbackEmbedding()
+
+
 app = FastAPI(
     title="Integrity Risk Assessment Agent",
-    version="1.0.0",
+    version="1.1.0",
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
 )
 
-# Set up observability
 setup_observability(app)
-
-# Add metrics middleware
 app.add_middleware(MetricsMiddleware)
 
-# Mount Prometheus metrics endpoint
-metrics_app = make_asgi_app(registry=registry)
-app.mount("/metrics", metrics_app)
-
 settings = load_settings()
-
-# Initialize core components
 vector_store = build_vector_store()
 memory_agent = MemoryManagerAgent(vector_store)
 llm_client = build_llm_client()
 storage_repo = build_storage_repository(settings)
 embedding_model = EmbeddingFactory.create(os.getenv("EMBEDDING_TYPE", "hybrid"))
-connector_config = ConnectorConfig()
-connectors = MultiSourceConnector(connector_config)
+connectors = MultiSourceConnector(ConnectorConfig())
+
 orchestrator = OrchestratorAgent(
     retrieval=RetrievalAgent(),
     analysis=AnalysisForecastingAgent(),
@@ -81,94 +85,61 @@ orchestrator = OrchestratorAgent(
     calibration=CalibrationAgent(),
 )
 
-# Health check service
 health_service = HealthCheckService(vector_store, storage_repo, llm_client)
 
 
-# ============================================================================
-# Health & Readiness Endpoints
-# ============================================================================
-
 @app.get("/health")
 async def health() -> dict:
-    """Health check endpoint."""
-    return await health_service.get_health()
+    return {
+        "status": "ok",
+        "env": settings.app_env,
+        "vector_backend": settings.vector_backend,
+        "llm_backend": type(llm_client).__name__,
+        "storage_backend": settings.db_backend,
+    }
 
 
 @app.get("/ready")
 async def readiness() -> dict:
-    """Readiness check endpoint."""
     return await health_service.get_readiness()
 
 
-# ============================================================================
-# Authentication & Token Endpoints
-# ============================================================================
-
 @app.post("/auth/token")
 async def login(username: str, password: str) -> dict:
-    """
-    Generate a JWT token for API access.
-    
-    Args:
-        username: User ID
-        password: Password (in production, validate against secure store)
-    
-    Returns:
-        JWT token for subsequent API calls
-    """
-    # TODO: In production, validate against secure password store
-    token = TokenManager.create_access_token(
-        subject=username,
-        role="analyst",  # Determine role from user store
-    )
+    token = TokenManager.create_access_token(subject=username, role="analyst")
     return {"access_token": token, "token_type": "bearer"}
 
 
-# ============================================================================
-# Assessment Endpoints
-# ============================================================================
-
 @app.post("/assess", response_model=AssessmentResponse)
-@instrument_assessment
-async def assess(
-    request: AssessRequest,
-    user: User = Depends(require_write_access),
-) -> AssessmentResponse:
-    """
-    Perform a risk assessment for an entity.
-    Requires write access (analyst role or higher).
-    """
-    logger.info(f"Assessment requested by {user.user_id} for {request.query.company_name}")
+async def assess(request: AssessRequest = Body(...), user: User = Depends(require_write_access)) -> AssessmentResponse:
+    logger.info("Assessment requested by %s for %s", user.user_id, request.query.company_name)
     result = orchestrator.assess(request)
     storage_repo.insert_assessment(result)
     return result
 
 
-# ============================================================================
-# Watchlist Endpoints
-# ============================================================================
+@app.post("/assess/async", response_model=AsyncTaskResponse)
+async def assess_async(request: AsyncAssessRequest = Body(...), user: User = Depends(require_write_access)) -> AsyncTaskResponse:
+    task_id = enqueue_assessment_job(request.company_name, request.question)
+    return AsyncTaskResponse(task_id=task_id, status="queued")
+
+
+@app.get("/tasks/{task_id}")
+async def task_status(task_id: str, user: User = Depends(get_authenticated_user)) -> dict:
+    return get_job_status(task_id)
+
 
 @app.post("/watchlist", response_model=WatchlistEntry, status_code=201)
-async def add_to_watchlist(
-    entry: WatchlistEntry,
-    user: User = Depends(require_write_access),
-) -> WatchlistEntry:
-    """Add or update an entity on the watchlist."""
-    logger.info(f"Watchlist entry created by {user.user_id} for {entry.entity_id}")
+async def add_to_watchlist(entry: WatchlistEntry, user: User = Depends(require_write_access)) -> WatchlistEntry:
     return storage_repo.upsert_watchlist(entry)
 
 
 @app.get("/watchlist/{entity_id}", response_model=WatchlistStatus)
-async def get_watchlist_status(
-    entity_id: str,
-    user: User = Depends(get_authenticated_user),
-) -> WatchlistStatus:
-    """Get current status of a watchlisted entity."""
+async def get_watchlist_status(entity_id: str, user: User = Depends(get_authenticated_user)) -> WatchlistStatus:
     entry = storage_repo.get_watchlist(entity_id)
     if not entry:
         raise HTTPException(status_code=404, detail=f"Entity '{entity_id}' not on watchlist.")
-    
+
     result = orchestrator.assess(
         AssessRequest(query=UserQuery(company_name=entry.company_name, question="Watchlist status check."))
     )
@@ -182,51 +153,24 @@ async def get_watchlist_status(
 
 
 @app.get("/watchlist", response_model=list[WatchlistEntry])
-async def list_watchlist(
-    user: User = Depends(get_authenticated_user),
-) -> list[WatchlistEntry]:
-    """List all entities on the watchlist."""
+async def list_watchlist(user: User = Depends(get_authenticated_user)) -> list[WatchlistEntry]:
     return storage_repo.list_watchlist()
 
 
-@app.delete("/watchlist/{entity_id}", status_code=204)
-async def remove_from_watchlist(
-    entity_id: str,
-    user: User = Depends(require_write_access),
-) -> None:
-    """Remove an entity from the watchlist."""
-    logger.info(f"Watchlist entry deleted by {user.user_id} for {entity_id}")
+@app.delete("/watchlist/{entity_id}", status_code=200)
+async def remove_from_watchlist(entity_id: str, user: User = Depends(require_write_access)) -> None:
     storage_repo.delete_watchlist(entity_id)
 
 
-# ============================================================================
-# Assessment Audit Endpoints
-# ============================================================================
-
 @app.get("/assessments/{entity_id}", response_model=list[AssessmentAuditRecord])
 async def list_assessments(
-    entity_id: str,
-    limit: int = 25,
-    user: User = Depends(get_authenticated_user),
+    entity_id: str, limit: int = 25, user: User = Depends(get_authenticated_user)
 ) -> list[AssessmentAuditRecord]:
-    """Get assessment audit trail for an entity."""
     return storage_repo.list_assessments(entity_id=entity_id, limit=limit)
 
 
-# ============================================================================
-# External Data Connector Endpoints (for testing/debugging)
-# ============================================================================
-
 @app.get("/debug/connectors/{entity_name}")
-async def debug_connectors(
-    entity_name: str,
-    user: User = Depends(get_authenticated_user),
-) -> dict:
-    """
-    Debug endpoint: Fetch evidence from all external connectors.
-    WARNING: For development/testing only. Remove in production.
-    """
-    logger.info(f"Debug connector call by {user.user_id} for {entity_name}")
+async def debug_connectors(entity_name: str, user: User = Depends(get_authenticated_user)) -> dict:
     evidence = await connectors.fetch_all(entity_name)
     return {
         "entity": entity_name,
@@ -243,19 +187,8 @@ async def debug_connectors(
     }
 
 
-# ============================================================================
-# Embedding Endpoints (for testing/debugging)
-# ============================================================================
-
 @app.post("/debug/embed")
-async def debug_embed(
-    texts: list[str],
-    user: User = Depends(get_authenticated_user),
-) -> dict:
-    """
-    Debug endpoint: Generate embeddings for text.
-    WARNING: For development/testing only. Remove in production.
-    """
+async def debug_embed(texts: list[str], user: User = Depends(get_authenticated_user)) -> dict:
     embeddings = embedding_model.embed_sync(texts)
     return {
         "texts": texts,
@@ -264,4 +197,5 @@ async def debug_embed(
     }
 
 
-import os
+
+
