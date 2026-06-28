@@ -3,32 +3,27 @@ __pycache__/
 *.pyo
 *.pyd
 
-# Virtual environments
 .venv/
 venv/
 env/
 .ipenv/
 .python-version.local
 
-# Environment files
 .env
 .env.*
 !.env.example
 
-# BRD artifacts
 BRD/
 BRD-backup/
 brd_text/
 *.pdf
 *.docx
 
-# Local databases
 data/*.db
 *.db
 *.sqlite
 *.sqlite3
 
-# Logs
 logs/
 *.log
 

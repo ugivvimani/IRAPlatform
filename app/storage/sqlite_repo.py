@@ -4,7 +4,13 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-from app.contracts import AssessmentAuditRecord, AssessmentResponse, WatchlistEntry
+from app.contracts import (
+    AssessmentAuditRecord,
+    AssessmentResponse,
+    PolicyThresholdRecord,
+    PolicyThresholdUpsert,
+    WatchlistEntry,
+)
 from app.storage.base import StorageRepository
 
 
@@ -43,6 +49,27 @@ class SQLiteRepository(StorageRepository):
                     requires_manual_review INTEGER NOT NULL,
                     created_at TEXT NOT NULL
                 )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS policy_thresholds (
+                    policy_key TEXT NOT NULL,
+                    threshold_value REAL NOT NULL,
+                    version INTEGER NOT NULL,
+                    approved_by TEXT NOT NULL,
+                    approval_notes TEXT NOT NULL DEFAULT '',
+                    is_active INTEGER NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(policy_key, version)
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_policy_thresholds_active
+                ON policy_thresholds (policy_key, is_active)
                 """
             )
 
@@ -94,7 +121,7 @@ class SQLiteRepository(StorageRepository):
             )
             for row in rows
         ]
-    
+
     def delete_watchlist(self, entity_id: str) -> bool:
         with self._connect() as conn:
             cur = conn.execute(
@@ -148,3 +175,77 @@ class SQLiteRepository(StorageRepository):
             )
             for row in rows
         ]
+
+    def upsert_policy_threshold(self, policy_key: str, payload: PolicyThresholdUpsert) -> PolicyThresholdRecord:
+        now = datetime.now(timezone.utc)
+        with self._connect() as conn:
+            current = conn.execute(
+                "SELECT COALESCE(MAX(version), 0) AS max_version FROM policy_thresholds WHERE policy_key = ?",
+                (policy_key,),
+            ).fetchone()
+            next_version = int(current["max_version"]) + 1
+
+            conn.execute(
+                "UPDATE policy_thresholds SET is_active = 0, updated_at = ? WHERE policy_key = ? AND is_active = 1",
+                (now.isoformat(), policy_key),
+            )
+            conn.execute(
+                """
+                INSERT INTO policy_thresholds (
+                    policy_key, threshold_value, version, approved_by, approval_notes, is_active, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+                """,
+                (
+                    policy_key,
+                    float(payload.threshold_value),
+                    next_version,
+                    payload.approved_by,
+                    payload.approval_notes,
+                    now.isoformat(),
+                    now.isoformat(),
+                ),
+            )
+
+            row = conn.execute(
+                """
+                SELECT policy_key, threshold_value, version, approved_by, approval_notes, is_active, created_at, updated_at
+                FROM policy_thresholds
+                WHERE policy_key = ? AND version = ?
+                """,
+                (policy_key, next_version),
+            ).fetchone()
+
+        return PolicyThresholdRecord(
+            policy_key=row["policy_key"],
+            threshold_value=float(row["threshold_value"]),
+            version=int(row["version"]),
+            approved_by=row["approved_by"],
+            approval_notes=row["approval_notes"],
+            is_active=bool(row["is_active"]),
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+        )
+
+    def get_active_policy_thresholds(self) -> dict[str, PolicyThresholdRecord]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT policy_key, threshold_value, version, approved_by, approval_notes, is_active, created_at, updated_at
+                FROM policy_thresholds
+                WHERE is_active = 1
+                """
+            ).fetchall()
+
+        return {
+            row["policy_key"]: PolicyThresholdRecord(
+                policy_key=row["policy_key"],
+                threshold_value=float(row["threshold_value"]),
+                version=int(row["version"]),
+                approved_by=row["approved_by"],
+                approval_notes=row["approval_notes"],
+                is_active=bool(row["is_active"]),
+                created_at=datetime.fromisoformat(row["created_at"]),
+                updated_at=datetime.fromisoformat(row["updated_at"]),
+            )
+            for row in rows
+        }

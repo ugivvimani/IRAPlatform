@@ -18,7 +18,7 @@ from app.agents.calibration import CalibrationAgent
 from app.agents.conflict_resolution import ConflictResolutionAgent
 from app.agents.memory_manager import MemoryManagerAgent
 from app.agents.output_composer import OutputComposerAgent
-from app.agents.retrieval import RetrievalAgent
+from app.agents.retrieval import RetrievalAgent, RetrievalConnector, RetrievalObservation
 from app.orchestrator import OrchestratorAgent
 from app.vector_store.pinecone_store import PineconeVectorStore
 
@@ -130,6 +130,32 @@ class TestRetrieval:
         ]
         assert RetrievalAgent.detect_conflicts(ev) is False
 
+    def test_entity_resolution_marks_ambiguous_match(self):
+        class _BadMatchConnector(RetrievalConnector):
+            connector_name = "bad_match"
+
+            def fetch(self, query_company: str) -> list[RetrievalObservation]:
+                return [
+                    RetrievalObservation(
+                        connector=self.connector_name,
+                        signal="sanctions_status",
+                        value="not_sanctioned",
+                        source_name="OFAC",
+                        source_tier="official",
+                        provenance_url="https://ofac.treasury.gov/",
+                        dimension=RiskDimension.SANCTIONS,
+                        timestamp=datetime.now(timezone.utc),
+                        entity_match_confidence=0.95,
+                        source_confidence=0.9,
+                        metadata={"matched_name": "Completely Unrelated Entity"},
+                    )
+                ]
+
+        agent = RetrievalAgent()
+        agent.connectors = [_BadMatchConnector()]
+        evidence = agent.retrieve("Apple Inc", [])
+        assert any(item.signal == "entity_resolution_ambiguous" for item in evidence)
+
 
 # ── analysis forecasting ──────────────────────────────────────────────────────
 
@@ -187,6 +213,18 @@ class TestConflictResolution:
         assert result.winner is not None
         assert "OFAC" in result.winner.interpretation
 
+    def test_tot_beam_width_is_bounded(self):
+        ev = [
+            _ev("e1", RiskDimension.SANCTIONS, "sanctions_status", "not_sanctioned", "OFAC", "official", 0.95),
+            _ev("e2", RiskDimension.SANCTIONS, "sanctions_status", "reported_sanctioned", "Reuters", "tier1_news", 0.85),
+            _ev("e3", RiskDimension.SANCTIONS, "sanctions_status", "under_review", "BlogA", "secondary", 0.8),
+            _ev("e4", RiskDimension.SANCTIONS, "sanctions_status", "possible_match", "BlogB", "secondary", 0.79),
+        ]
+        result = ConflictResolutionAgent().resolve(ev, [])
+        assert result.winner is not None
+        assert len(result.alternatives) <= 2
+        assert "beam width 3" in result.rationale
+
 
 # ── calibration ───────────────────────────────────────────────────────────────
 
@@ -208,17 +246,20 @@ class TestCalibration:
     def test_manual_review_reduces_reliability(self):
         from app.contracts import AssessmentDecision, ConflictResolutionResult, RiskRating, ConfidenceLevel
         agent = CalibrationAgent()
+        # Use no-conflict scenario so both records score as TP (risky, uncontested).
+        # manual_review=True reduces effective_sample_size by 0.7, lowering the
+        # weighted success contribution and therefore the reliability score.
+        no_conflict = ConflictResolutionResult(conflict_detected=False, rationale="no conflict")
         decision_mr = AssessmentDecision(
             risk_rating=RiskRating.WATCH, confidence=ConfidenceLevel.MEDIUM,
             summary="watch", recommended_next_steps=[], requires_manual_review=True,
         )
-        conflict = ConflictResolutionResult(conflict_detected=True, rationale="conflict")
         decision_clean = AssessmentDecision(
             risk_rating=RiskRating.WATCH, confidence=ConfidenceLevel.MEDIUM,
             summary="watch", recommended_next_steps=[], requires_manual_review=False,
         )
-        r_mr = agent.build_record("TestCo", "s", decision_mr, conflict, [])
-        r_clean = agent.build_record("TestCo", "s", decision_clean, conflict, [])
+        r_mr = agent.build_record("TestCo", "s", decision_mr, no_conflict, [])
+        r_clean = agent.build_record("TestCo", "s", decision_clean, no_conflict, [])
         assert r_mr.reliability_score < r_clean.reliability_score
 
     def test_sparse_evidence_keeps_calibration_uncertain(self):
@@ -248,6 +289,7 @@ class TestOrchestratorIntegration:
         result = orchestrator_instance.assess(req)
         assert result.decision.risk_rating is not None
         assert result.decision.confidence is not None
+        assert result.escalation is not None
 
     def test_assess_with_safe_evidence_not_restricted(self, orchestrator_instance):
         req = AssessRequest(
@@ -298,3 +340,15 @@ class TestOrchestratorIntegration:
         mem.persist_calibration(rec)
         reliabilities = mem.load_source_reliability("EntityA")
         assert 0.49 <= reliabilities["LowSampleSource"] <= 0.6
+
+    def test_entity_resolution_ambiguity_triggers_escalation_reason(self, orchestrator_instance):
+        req = AssessRequest(
+            query=UserQuery(company_name="Apple Inc", question="safe?"),
+            evidence=[
+                _ev("a1", RiskDimension.SANCTIONS, "entity_resolution_ambiguous", "requires_review", "system", "secondary"),
+            ],
+        )
+        result = orchestrator_instance.assess(req)
+        assert result.escalation is not None
+        assert "ENTITY_RESOLUTION_REVIEW_REQUIRED" in result.escalation.reason_codes
+

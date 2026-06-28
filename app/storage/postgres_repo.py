@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from app.contracts import AssessmentAuditRecord, AssessmentResponse, WatchlistEntry
+from app.contracts import (
+    AssessmentAuditRecord,
+    AssessmentResponse,
+    PolicyThresholdRecord,
+    PolicyThresholdUpsert,
+    WatchlistEntry,
+)
 from app.storage.base import StorageRepository
 
 
@@ -41,6 +47,27 @@ class PostgresRepository(StorageRepository):
                         requires_manual_review BOOLEAN NOT NULL,
                         created_at TIMESTAMPTZ NOT NULL
                     )
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS policy_thresholds (
+                        policy_key TEXT NOT NULL,
+                        threshold_value DOUBLE PRECISION NOT NULL,
+                        version INTEGER NOT NULL,
+                        approved_by TEXT NOT NULL,
+                        approval_notes TEXT NOT NULL DEFAULT '',
+                        is_active BOOLEAN NOT NULL,
+                        created_at TIMESTAMPTZ NOT NULL,
+                        updated_at TIMESTAMPTZ NOT NULL,
+                        PRIMARY KEY(policy_key, version)
+                    )
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_policy_thresholds_active
+                    ON policy_thresholds (policy_key, is_active)
                     """
                 )
             conn.commit()
@@ -86,7 +113,7 @@ class PostgresRepository(StorageRepository):
                 )
                 rows = cur.fetchall()
         return [WatchlistEntry(entity_id=r[0], company_name=r[1], notes=r[2], added_at=r[3]) for r in rows]
-    
+
     def delete_watchlist(self, entity_id: str) -> bool:
         with self._connect() as conn:
             with conn.cursor() as cur:
@@ -149,3 +176,76 @@ class PostgresRepository(StorageRepository):
             )
             for row in rows
         ]
+
+    def upsert_policy_threshold(self, policy_key: str, payload: PolicyThresholdUpsert) -> PolicyThresholdRecord:
+        now = datetime.now(timezone.utc)
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT COALESCE(MAX(version), 0) FROM policy_thresholds WHERE policy_key = %s",
+                    (policy_key,),
+                )
+                max_version = int(cur.fetchone()[0])
+                next_version = max_version + 1
+
+                cur.execute(
+                    "UPDATE policy_thresholds SET is_active = false, updated_at = %s WHERE policy_key = %s AND is_active = true",
+                    (now, policy_key),
+                )
+
+                cur.execute(
+                    """
+                    INSERT INTO policy_thresholds (
+                        policy_key, threshold_value, version, approved_by, approval_notes, is_active, created_at, updated_at
+                    ) VALUES (%s, %s, %s, %s, %s, true, %s, %s)
+                    RETURNING policy_key, threshold_value, version, approved_by, approval_notes, is_active, created_at, updated_at
+                    """,
+                    (
+                        policy_key,
+                        float(payload.threshold_value),
+                        next_version,
+                        payload.approved_by,
+                        payload.approval_notes,
+                        now,
+                        now,
+                    ),
+                )
+                row = cur.fetchone()
+            conn.commit()
+
+        return PolicyThresholdRecord(
+            policy_key=row[0],
+            threshold_value=float(row[1]),
+            version=int(row[2]),
+            approved_by=row[3],
+            approval_notes=row[4],
+            is_active=bool(row[5]),
+            created_at=row[6],
+            updated_at=row[7],
+        )
+
+    def get_active_policy_thresholds(self) -> dict[str, PolicyThresholdRecord]:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT policy_key, threshold_value, version, approved_by, approval_notes, is_active, created_at, updated_at
+                    FROM policy_thresholds
+                    WHERE is_active = true
+                    """
+                )
+                rows = cur.fetchall()
+
+        return {
+            row[0]: PolicyThresholdRecord(
+                policy_key=row[0],
+                threshold_value=float(row[1]),
+                version=int(row[2]),
+                approved_by=row[3],
+                approval_notes=row[4],
+                is_active=bool(row[5]),
+                created_at=row[6],
+                updated_at=row[7],
+            )
+            for row in rows
+        }

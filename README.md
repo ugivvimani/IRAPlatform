@@ -27,6 +27,13 @@ python run_local.py
 - `POSTGRES_DSN`
 - `SQLITE_DB_PATH`
 - `PINECONE_API_KEY`
+- `OPENAI_API_KEY`
+- `EMBEDDING_TYPE` (`openai`)
+- `OPENAI_EMBEDDING_MODEL` (`text-embedding-3-small`)
+- `ENABLE_LIVE_CONNECTORS` (`true` to pull live data in `/assess`)
+- `NEWS_API_KEY` (for news connector)
+- `SEC_CONTACT_EMAIL` (required user-agent contact for SEC requests)
+- `ESG_API_KEY` (optional ESG connector)
 
 ## API endpoints
 

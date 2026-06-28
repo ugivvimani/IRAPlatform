@@ -1,5 +1,5 @@
 ﻿# Multi-stage build for Python application
-FROM python:3.14-slim as builder
+FROM python:3.12-slim as builder
 
 WORKDIR /app
 
@@ -16,7 +16,7 @@ RUN pip install --user --no-cache-dir -r requirements.txt
 
 
 # Runtime stage
-FROM python:3.14-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
@@ -50,4 +50,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
 
 # Run application
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
 

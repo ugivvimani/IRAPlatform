@@ -82,6 +82,9 @@ class ConflictResolutionResult(BaseModel):
     alternatives: list[HypothesisBranch] = Field(default_factory=list)
     requires_manual_review: bool = False
     rationale: str
+    # evidence_ids of items whose values were rejected during conflict resolution;
+    # scoring should exclude these to avoid diluting the resolved interpretation.
+    suppressed_evidence_ids: list[str] = Field(default_factory=list)
 
 
 class MemoryFact(BaseModel):
@@ -119,12 +122,33 @@ class AssessmentDecision(BaseModel):
     requires_manual_review: bool = False
 
 
+class EscalationContext(BaseModel):
+    escalation_required: bool = False
+    auto_hold: bool = False
+    risk_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    threshold: float = Field(default=0.75, ge=0.0, le=1.0)
+    reason_codes: list[str] = Field(default_factory=list)
+    review_message: str = ""
+
+
 class AssessmentResponse(BaseModel):
     query: UserQuery
     decision: AssessmentDecision
     evidence_chain: list[EvidenceItem] = Field(default_factory=list)
     conflict_result: ConflictResolutionResult | None = None
+    escalation: EscalationContext | None = None
     model_metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class CompactAssessmentResponse(BaseModel):
+    assessment_id: int
+    company_name: str
+    risk_rating: RiskRating
+    confidence: ConfidenceLevel
+    summary: str
+    recommended_next_steps: list[str] = Field(default_factory=list)
+    requires_manual_review: bool = False
+    evaluated_at: datetime
 
 
 class AssessRequest(BaseModel):
@@ -156,3 +180,20 @@ class AssessmentAuditRecord(BaseModel):
     confidence: ConfidenceLevel
     requires_manual_review: bool
     created_at: datetime
+
+
+class PolicyThresholdRecord(BaseModel):
+    policy_key: str
+    threshold_value: float
+    version: int
+    approved_by: str
+    approval_notes: str = ""
+    is_active: bool = True
+    created_at: datetime
+    updated_at: datetime
+
+
+class PolicyThresholdUpsert(BaseModel):
+    threshold_value: float
+    approved_by: str = Field(min_length=1)
+    approval_notes: str = ""

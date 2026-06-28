@@ -12,6 +12,7 @@ from app.agents.memory_manager import MemoryManagerAgent
 from app.agents.output_composer import OutputComposerAgent
 from app.agents.retrieval import RetrievalAgent
 from app.contracts import AssessRequest, UserQuery
+from app.llm.factory import build_llm_client
 from app.settings import load_settings
 from app.storage.factory import build_storage_repository
 from app.vector_store.factory import build_vector_store
@@ -31,6 +32,7 @@ def main() -> None:
     settings = load_settings()
     storage = build_storage_repository(settings)
     vector_store = build_vector_store()
+    llm_client = build_llm_client()
     orchestrator = OrchestratorAgent(
         retrieval=RetrievalAgent(),
         analysis=AnalysisForecastingAgent(),
@@ -38,6 +40,7 @@ def main() -> None:
         memory=MemoryManagerAgent(vector_store),
         composer=OutputComposerAgent(),
         calibration=CalibrationAgent(),
+        llm_client=llm_client,
     )
 
     while True:

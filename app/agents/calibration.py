@@ -33,8 +33,13 @@ class CalibrationAgent:
             else 0.5
         )
 
-        true_positive = 1 if predicted_risky and conflict_present else 0
-        false_positive = 1 if predicted_risky and not conflict_present else 0
+        # Outcome classification:
+        # TP: predicted risky with uncontested evidence (confident, reliable finding)
+        # FP: predicted risky but evidence was contested (risky call under uncertainty)
+        # TN: predicted safe with clean evidence (no signals, no conflict)
+        # FN: predicted safe despite conflicting signals (possible missed risk)
+        true_positive = 1 if predicted_risky and not conflict_present else 0
+        false_positive = 1 if predicted_risky and conflict_present else 0
         true_negative = 1 if (not predicted_risky and not conflict_present and not insufficient_data) else 0
         false_negative = 1 if (not predicted_risky and conflict_present) else 0
         total_outcomes = true_positive + false_positive + true_negative + false_negative

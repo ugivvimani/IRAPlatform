@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from datetime import datetime, timezone
 
@@ -92,7 +92,7 @@ class MemoryManagerAgent:
                 VectorDocument(
                     doc_id=calibration_doc_id,
                     text=f"{record.source_name} {record.signal_type} reliability",
-                    metadata=record.model_dump(),
+                    metadata={k: (v.isoformat() if hasattr(v, "isoformat") else v) for k, v in record.model_dump().items()},
                 )
             ],
         )
@@ -116,3 +116,4 @@ class MemoryManagerAgent:
                 (reliability * sample_size + 0.5 * prior_strength) / (sample_size + prior_strength)
             )
         return by_source
+

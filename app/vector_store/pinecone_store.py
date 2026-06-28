@@ -1,9 +1,12 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
+import logging
 import os
 from typing import Any
 
 from app.vector_store.base import VectorDocument, VectorStoreRepository
+
+logger = logging.getLogger(__name__)
 
 
 class PineconeVectorStore(VectorStoreRepository):
@@ -11,14 +14,21 @@ class PineconeVectorStore(VectorStoreRepository):
     Pinecone vector store adapter.
     Uses the Pinecone SDK when PINECONE_API_KEY is set; falls back to
     an in-memory store for local dev without credentials.
+
+    Accepts an optional ``embedding_fn`` callable so the caller (main.py)
+    can inject the real OpenAI embedding model.  When not provided it falls
+    back to the deterministic MD5 hash (safe for unit tests / offline dev
+    but NOT suitable for meaningful semantic search).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, embedding_fn=None) -> None:
         self._api_key = os.getenv("PINECONE_API_KEY", "").strip()
         self._index_name = os.getenv("PINECONE_INDEX", "ira-platform-memory")
         self._namespace_prefix = os.getenv("PINECONE_NAMESPACE", "default")
         self._index: Any = None
         self._memory: dict[str, list[VectorDocument]] = {}
+        # Caller-injected embedding function; signature: (text: str) -> list[float]
+        self._embedding_fn = embedding_fn
 
         if self._api_key:
             self._index = self._connect()
@@ -88,9 +98,14 @@ class PineconeVectorStore(VectorStoreRepository):
         except Exception:
             return self._mem_query(namespace, text, top_k, metadata_filter)
 
-    @staticmethod
-    def _embed(text: str) -> list[float]:
-        """Deterministic placeholder embedding — replace with real encoder in production."""
+    def _embed(self, text: str) -> list[float]:
+        """Return real embeddings when a fn is injected; MD5 hash as offline fallback."""
+        if self._embedding_fn is not None:
+            try:
+                return self._embedding_fn(text)
+            except Exception as exc:
+                logger.warning("embedding_fn failed, using hash fallback: %s", exc)
+        # Deterministic fallback — only for tests / offline dev
         import hashlib
         h = int(hashlib.md5(text.encode()).hexdigest(), 16)
         return [(((h >> i) & 0xFF) / 255.0) for i in range(1536)]
