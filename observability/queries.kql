@@ -1,0 +1,50 @@
+// IRA Platform observability queries for Azure Monitor / App Insights
+// Event convention used by the app:
+// - IRA.AssessmentCompleted
+// - IRA.CalibrationEvaluated
+// - IRA.MemoryWriteEvaluated
+// - IRA.ToTBranchEvaluated
+
+let lookback = 7d;
+let calibrationEvents = customEvents
+| where timestamp > ago(lookback)
+| where name == "IRA.CalibrationEvaluated"
+| extend
+    predicted_risky = tostring(customDimensions.predicted_risky) == "true",
+    actual_risky = tostring(customDimensions.actual_risky) == "true",
+    confidence_score = todouble(customDimensions.confidence_score),
+    is_correct = tostring(customDimensions.is_correct) == "true";
+
+// False positive rate
+calibrationEvents
+| summarize false_positive = countif(predicted_risky and not(actual_risky)),
+            true_negative = countif(not(predicted_risky) and not(actual_risky))
+| extend FPR = iff((false_positive + true_negative) == 0, real(null), todouble(false_positive) / todouble(false_positive + true_negative))
+;
+
+// False negative rate
+calibrationEvents
+| summarize false_negative = countif(not(predicted_risky) and actual_risky),
+            true_positive = countif(predicted_risky and actual_risky)
+| extend FNR = iff((false_negative + true_positive) == 0, real(null), todouble(false_negative) / todouble(false_negative + true_positive))
+;
+
+// Expected calibration error (5 bins)
+calibrationEvents
+| extend confidence_bin = bin(confidence_score, 0.2)
+| summarize
+    n = count(),
+    avg_confidence = avg(confidence_score),
+    accuracy = avg(iif(is_correct, 1.0, 0.0))
+    by confidence_bin
+| extend abs_gap = abs(avg_confidence - accuracy), weighted_gap = abs_gap * todouble(n)
+| summarize ECE = iff(sum(n) == 0, real(null), sum(weighted_gap) / sum(n))
+;
+
+// Assessment throughput and manual-review rate
+customEvents
+| where timestamp > ago(lookback)
+| where name == "IRA.AssessmentCompleted"
+| extend requires_manual_review = tostring(customDimensions.requires_manual_review) == "true"
+| summarize assessments = count(), manual_reviews = countif(requires_manual_review), avg_confidence = avg(todouble(customDimensions.confidence_score))
+| extend manual_review_rate = iff(assessments == 0, real(null), todouble(manual_reviews) / todouble(assessments))

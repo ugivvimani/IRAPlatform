@@ -1,15 +1,55 @@
-__pycache__\
+__pycache__/
 *.py[cod]
-.venv\
-.pytest_cache\
 *.pyo
 *.pyd
 
-venv\
+.venv/
+venv/
+env/
+.ipenv/
 .python-version.local
 
 .env
 .env.*
 !.env.example
 
-BRD\
+BRD/
+BRD-backup/
+brd_text/
+*.pdf
+*.docx
+
+data/*.db
+*.db
+*.sqlite
+*.sqlite3
+
+logs/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Build & dist
+build/
+dist/
+*.egg-info/
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Docker volumes
+postgres_data/
+ira_data/
+azurite_data/

@@ -1,0 +1,102 @@
+﻿version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ira-postgres
+    environment:
+      POSTGRES_USER: ${DB_USER:-ira_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-ira_password}
+      POSTGRES_DB: ${DB_NAME:-ira_db}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-ira_user}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite
+    container_name: ira-azurite
+    command: azurite --blobHost 0.0.0.0 --queueHost 0.0.0.0
+    ports:
+      - "10000:10000"
+      - "10001:10001"
+      - "10002:10002"
+    volumes:
+      - azurite_data:/data
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ira-api
+    environment:
+      DB_BACKEND: ${DB_BACKEND:-postgres}
+      POSTGRES_DSN: postgresql://${DB_USER:-ira_user}:${DB_PASSWORD:-ira_password}@postgres:5432/${DB_NAME:-ira_db}
+      SQLITE_DB_PATH: /data/ira.db
+      APPLICATIONINSIGHTS_CONNECTION_STRING: ${APPLICATIONINSIGHTS_CONNECTION_STRING:-}
+      AZURE_KEY_VAULT_URL: ${AZURE_KEY_VAULT_URL:-}
+      AZURE_STORAGE_CONNECTION_STRING: ${AZURE_STORAGE_CONNECTION_STRING:-UseDevelopmentStorage=true}
+      AZURE_WEBJOBS_ASSESSMENT_QUEUE: ${AZURE_WEBJOBS_ASSESSMENT_QUEUE:-assessment-jobs}
+      PINECONE_API_KEY: ${PINECONE_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      azurite:
+        condition: service_started
+    volumes:
+      - ./logs:/app/logs
+      - ira_data:/data
+    restart: unless-stopped
+
+  webjob-continuous:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ira-webjob-continuous
+    command: python webjobs/continuous/run.py
+    environment:
+      DB_BACKEND: ${DB_BACKEND:-postgres}
+      POSTGRES_DSN: postgresql://${DB_USER:-ira_user}:${DB_PASSWORD:-ira_password}@postgres:5432/${DB_NAME:-ira_db}
+      AZURE_STORAGE_CONNECTION_STRING: ${AZURE_STORAGE_CONNECTION_STRING:-UseDevelopmentStorage=true}
+      AZURE_WEBJOBS_ASSESSMENT_QUEUE: ${AZURE_WEBJOBS_ASSESSMENT_QUEUE:-assessment-jobs}
+      PINECONE_API_KEY: ${PINECONE_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      azurite:
+        condition: service_started
+    restart: unless-stopped
+
+  webjob-scheduled:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ira-webjob-scheduled
+    command: sh -c "while true; do python webjobs/scheduled/run.py; sleep 3600; done"
+    environment:
+      DB_BACKEND: ${DB_BACKEND:-postgres}
+      POSTGRES_DSN: postgresql://${DB_USER:-ira_user}:${DB_PASSWORD:-ira_password}@postgres:5432/${DB_NAME:-ira_db}
+      PINECONE_API_KEY: ${PINECONE_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  ira_data:
+  azurite_data:

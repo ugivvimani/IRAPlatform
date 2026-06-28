@@ -1,0 +1,33 @@
+{
+  "name": "IRA Platform Observability Workspace",
+  "description": "Azure Monitor / App Insights query pack for calibration quality, manual review pressure, and ToT safety metrics.",
+  "sections": [
+    {
+      "title": "Calibration Quality",
+      "queries": [
+        "False Positive Rate",
+        "False Negative Rate",
+        "Expected Calibration Error"
+      ]
+    },
+    {
+      "title": "Decision Flow",
+      "queries": [
+        "Assessment throughput",
+        "Manual review rate",
+        "Confidence distribution"
+      ]
+    },
+    {
+      "title": "Safety Signals",
+      "queries": [
+        "Conflict rate",
+        "Cold-start frequency",
+        "Memory write rejection rate"
+      ]
+    }
+  ],
+  "artifacts": {
+    "queries": "observability/queries.kql"
+  }
+}
