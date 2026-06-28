@@ -54,6 +54,9 @@ class EvidenceItem(BaseModel):
     source_confidence: float = Field(ge=0.0, le=1.0)
     provenance_url: str
     metadata: dict[str, Any] = Field(default_factory=dict)
+    # Raw human-readable content from the source (article text, filing excerpt, etc.).
+    # Used by MemoryManagerAgent to generate a concise summary for vector storage.
+    raw_content: str | None = None
 
 
 class CriticScoreVector(BaseModel):
@@ -74,6 +77,9 @@ class HypothesisBranch(BaseModel):
     score: CriticScoreVector
     composite_score: float = Field(ge=0.0, le=1.0)
     confidence: ConfidenceLevel
+    # Stability metadata — used by conflict resolution stability gate and audit trail
+    source_count: int = Field(default=1, ge=1)          # number of distinct sources supporting this branch
+    score_spread: float = Field(default=0.0, ge=0.0)    # pessimistic-to-optimistic score band; high = unstable
 
 
 class ConflictResolutionResult(BaseModel):

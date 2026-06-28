@@ -373,3 +373,54 @@ class RetrievalAgent:
         for item in evidence:
             grouped[(item.dimension, item.signal)].add(item.value)
         return any(len(values) > 1 for values in grouped.values())
+
+    def retrieve_supplemental(
+        self,
+        query_company: str,
+        conflict_result: Any,
+        existing_evidence: list[EvidenceItem],
+    ) -> list[EvidenceItem]:
+        """
+        Revise step: fetch targeted supplemental evidence when conflict resolution
+        found contradictions or the winning branch score is below 0.75.
+
+        Strategy:
+        - Only runs when live connectors are available (no-op otherwise).
+        - Builds a focused news query from the conflicted dimensions to widen
+          the news window and check for corroborating or refuting signals.
+        - De-duplicates against existing_evidence_ids so only new items are returned.
+        - Returns at most 5 supplemental items to keep latency bounded.
+        """
+        if not (self.enable_live_connectors and self.live_connector is not None):
+            return []
+
+        try:
+            existing_ids = {e.evidence_id for e in existing_evidence}
+
+            # Build a focused query: append dimension keywords from conflicted signals
+            focus_terms: list[str] = []
+            if conflict_result.winner is not None:
+                interp = conflict_result.winner.interpretation
+                if "sanctions" in interp.lower():
+                    focus_terms.append("sanctions")
+                if "regulatory" in interp.lower() or "enforcement" in interp.lower():
+                    focus_terms.append("enforcement")
+                if "financial" in interp.lower():
+                    focus_terms.append("financial distress")
+            focused_query = query_company + (" " + " ".join(focus_terms) if focus_terms else "")
+
+            logger.info("retrieval_supplemental_start entity=%s query=%r", query_company, focused_query)
+            raw = self._run_async(self.live_connector.fetch_all(focused_query))
+            if not raw:
+                return []
+
+            resolved = self._apply_entity_resolution(query_company, raw)
+            new_items = [e for e in resolved if e.evidence_id not in existing_ids]
+            logger.info(
+                "retrieval_supplemental_done entity=%s new_items=%d", query_company, len(new_items)
+            )
+            return new_items[:5]
+
+        except Exception as exc:
+            logger.warning("retrieval_supplemental_failed entity=%s error=%s", query_company, exc)
+            return []

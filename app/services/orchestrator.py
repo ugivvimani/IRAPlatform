@@ -44,6 +44,8 @@ class OrchestratorAgent:
                 self.composer.llm_client = llm_client
             if not self.analysis.llm_client:
                 self.analysis.llm_client = llm_client
+            if not self.memory.llm_client:
+                self.memory.llm_client = llm_client
 
     def _apply_policy_thresholds(self) -> None:
         """Load active policy thresholds from storage and push them into agents."""
@@ -75,24 +77,68 @@ class OrchestratorAgent:
 
         logger.info("assessment_stage=memory_init_start entity=%s", entity_id)
         self.memory.initialize_working_memory(request.query, evidence)
-        historical = self.memory.load_historical_context(entity_id=request.query.company_name, top_k=5)
+        historical = self.memory.load_historical_context(
+            entity_id=request.query.company_name,
+            top_k=5,
+            query=request.query.question or request.query.company_name,
+        )
+
+        # Cold-start warm-up: seed global priors for any source that has no history yet.
+        # This ensures conflict resolution starts from informed reliability weights,
+        # not blind 0.5 defaults, even on the very first encounter with an entity.
+        is_cold_start = len(historical) == 0
+        if is_cold_start:
+            live_source_names = list({e.source_name for e in evidence if e.source_name.lower() != "system"})
+            self.memory.seed_cold_start(entity_id=request.query.company_name, source_names=live_source_names)
+            logger.info("assessment_stage=cold_start_seeded entity=%s sources=%s", entity_id, live_source_names)
+
         source_reliability = self.memory.load_source_reliability(entity_id=request.query.company_name)
+        # Load past conflict notes so the conflict agent can boost temporal_coherence
+        # when it recognises a recurring contradiction pattern for this entity.
+        conflict_history = self.memory.load_conflict_history(entity_id=request.query.company_name, top_k=3)
         logger.info(
-            "assessment_stage=memory_init_done entity=%s historical_count=%d source_reliability_count=%d",
+            "assessment_stage=memory_init_done entity=%s historical_count=%d source_reliability_count=%d cold_start=%s conflict_history=%d",
             entity_id,
             len(historical),
             len(source_reliability),
+            is_cold_start,
+            len(conflict_history),
         )
 
         # Observe + Revise: conflict handling.
         logger.info("assessment_stage=conflict_resolution_start entity=%s", entity_id)
-        conflict_result = self.conflict.resolve(evidence, historical, source_reliability=source_reliability)
+        conflict_result = self.conflict.resolve(
+            evidence, historical,
+            source_reliability=source_reliability,
+            conflict_history=conflict_history,
+        )
         logger.info(
             "assessment_stage=conflict_resolution_done entity=%s conflict_detected=%s alternatives=%d",
             entity_id,
             conflict_result.conflict_detected,
             len(conflict_result.alternatives),
         )
+
+        # ── Revise step ───────────────────────────────────────────────────────
+        # Re-retrieve targeted supplemental evidence when:
+        #   a) conflict was detected, OR
+        #   b) winning branch score is below 0.75 (weak / uncertain resolution)
+        # Supplemental items are merged into evidence before scoring so the
+        # quantitative pass and memory persist benefit from the fuller picture.
+        winner_score = conflict_result.winner.composite_score if conflict_result.winner else 1.0
+        needs_revise = conflict_result.conflict_detected or winner_score < 0.75
+        if needs_revise:
+            supplemental = self.retrieval.retrieve_supplemental(
+                query_company=request.query.company_name,
+                conflict_result=conflict_result,
+                existing_evidence=evidence,
+            )
+            if supplemental:
+                evidence = evidence + supplemental
+                logger.info(
+                    "assessment_stage=revise_done entity=%s supplemental_items=%d total_evidence=%d",
+                    entity_id, len(supplemental), len(evidence),
+                )
 
         # Act: quantitative scoring on conflict-resolved evidence only.
         # Suppressed items (rejected by conflict resolution) are excluded so the
@@ -128,7 +174,9 @@ class OrchestratorAgent:
             MemoryFact(
                 fact_id=f"{request.query.company_name}-{idx}",
                 entity_id=request.query.company_name,
-                summary=f"{item.dimension.value}:{item.signal}={item.value}",
+                # Use raw_content when available — gives the LLM summarizer rich prose
+                # to compress. Falls back to the structured key-value signal.
+                summary=item.raw_content or f"{item.dimension.value}:{item.signal}={item.value}",
                 dimension=item.dimension,
                 severity=1.0 - item.source_confidence,
                 source_reference=item.provenance_url,
@@ -145,6 +193,18 @@ class OrchestratorAgent:
                 conflict_result=conflict_result,
                 evidence=evidence,
             )
+        )
+        # Persist conflict resolution note so future assessments can check whether
+        # similar contradictions have occurred before (feeds temporal_coherence scoring).
+        if conflict_result.conflict_detected:
+            self.memory.persist_conflict_note(request.query.company_name, conflict_result)
+        # Persist the LLM-generated assessment narrative for semantic retrieval of similar past cases.
+        self.memory.persist_assessment_narrative(
+            entity_id=request.query.company_name,
+            risk_rating=decision.risk_rating.value,
+            confidence=decision.confidence.value,
+            summary=decision.summary,
+            requires_manual_review=decision.requires_manual_review,
         )
         logger.info("assessment_stage=persist_done entity=%s memory_records_written=%d", entity_id, len(stable_facts))
 

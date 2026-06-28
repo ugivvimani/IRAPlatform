@@ -11,7 +11,7 @@ from app.contracts import (
     HypothesisBranch,
     MemoryFact,
 )
-from app.policy import composite_score, recency_score, source_priority
+from app.policy import composite_score, recency_score, score_bounds, source_priority, sparsity_dampener
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +57,13 @@ class ConflictResolutionAgent:
         evidence: list[EvidenceItem],
         historical_facts: list[MemoryFact],
         source_reliability: dict[str, float] | None = None,
+        conflict_history: list[str] | None = None,
     ) -> ConflictResolutionResult:
         source_reliability = source_reliability or {}
+        conflict_history = conflict_history or []
+        # A recurring contradiction pattern (same entity conflicted before) boosts
+        # temporal_coherence for the top-ranked candidate since it's a known issue.
+        has_prior_conflict_pattern = len(conflict_history) > 0
         grouped: dict[tuple[str, str], list[EvidenceItem]] = defaultdict(list)
         for item in evidence:
             grouped[(item.dimension.value, item.signal)].append(item)
@@ -106,11 +111,28 @@ class ConflictResolutionAgent:
                     recency=recency_score(candidate.timestamp),
                     entity_certainty=candidate.entity_match_confidence,
                     corroboration=corroboration,
-                    temporal_coherence=1.0 if has_historical_pattern else (0.55 if cold_start else 0.65),
+                    # Known prior conflict pattern → temporal coherence gets a boost
+                    # because this is a recognised recurring pattern, not novel noise.
+                    temporal_coherence=(
+                        1.0 if has_historical_pattern
+                        else (0.72 if has_prior_conflict_pattern
+                              else (0.55 if cold_start else 0.65))
+                    ),
                     contradiction_penalty=0.2 if len(group) > 1 else 0.0,
                     evidence_sufficiency_penalty=evidence_penalty,
                 )
-                score = composite_score(score_vector)
+                raw_score = composite_score(score_vector)
+
+                # Apply sparsity dampener: single-source branches cannot silently win
+                source_count = len(supporting_sources)
+                damped_score = raw_score * sparsity_dampener(source_count, cold_start)
+
+                # Score spread: estimates how much the score could shift under uncertainty
+                pess, opt = score_bounds(score_vector)
+                spread = round(
+                    (opt - pess) * sparsity_dampener(source_count, cold_start), 4
+                )
+
                 branches.append(
                     HypothesisBranch(
                         branch_id=f"branch-{idx}-d{depth}-{candidate.evidence_id}",
@@ -125,11 +147,13 @@ class ConflictResolutionAgent:
                             f"Bounded ToT depth {depth}/{self.TOT_DEPTH_LIMIT} considered.",
                         ],
                         score=score_vector,
-                        composite_score=score,
+                        composite_score=round(min(damped_score, 1.0), 4),
+                        source_count=source_count,
+                        score_spread=spread,
                         confidence=(
                             ConfidenceLevel.HIGH
-                            if score >= self.TOT_STABLE_THRESHOLD and not low_entity_certainty and not cold_start
-                            else (ConfidenceLevel.MEDIUM if score >= 0.62 else ConfidenceLevel.LOW)
+                            if damped_score >= self.TOT_STABLE_THRESHOLD and not low_entity_certainty and not cold_start
+                            else (ConfidenceLevel.MEDIUM if damped_score >= 0.62 else ConfidenceLevel.LOW)
                         ),
                     )
                 )
@@ -138,13 +162,22 @@ class ConflictResolutionAgent:
         branches = branches[: self.TOT_BEAM_WIDTH]
         winner = branches[0]
         alternatives = branches[1:3]
+
+        # --- Stability gates ---
+        # 1. Score below absolute floor
         requires_manual_review = winner.composite_score < 0.65
+        # 2. Too-narrow margin between winner and first alternative
         confidence_margin = winner.composite_score - (alternatives[0].composite_score if alternatives else 0.0)
         if confidence_margin < 0.12:
             requires_manual_review = True
+        # 3. Cold-start: even a good score is not trustworthy without history
         if cold_start and winner.composite_score < 0.8:
             requires_manual_review = True
+        # 4. Below stable threshold with a live alternative
         if winner.composite_score < self.TOT_STABLE_THRESHOLD and len(branches) > 1:
+            requires_manual_review = True
+        # 5. High score spread (uncertainty too wide to trust the central estimate)
+        if winner.score_spread > 0.20:
             requires_manual_review = True
 
         entity_hints = ", ".join({e.source_name for e in evidence})

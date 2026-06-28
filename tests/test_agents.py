@@ -339,7 +339,9 @@ class TestOrchestratorIntegration:
         )
         mem.persist_calibration(rec)
         reliabilities = mem.load_source_reliability("EntityA")
-        assert 0.49 <= reliabilities["LowSampleSource"] <= 0.6
+        # The Bayesian blend centres around the global prior for this unknown source (0.60).
+        # With sample_size=0.1 and 1 TP: result should be above 0.60 but below 0.80.
+        assert 0.55 <= reliabilities["LowSampleSource"] <= 0.80
 
     def test_entity_resolution_ambiguity_triggers_escalation_reason(self, orchestrator_instance):
         req = AssessRequest(
@@ -351,4 +353,116 @@ class TestOrchestratorIntegration:
         result = orchestrator_instance.assess(req)
         assert result.escalation is not None
         assert "ENTITY_RESOLUTION_REVIEW_REQUIRED" in result.escalation.reason_codes
+
+
+# ── cold-start warm-up ────────────────────────────────────────────────────────
+
+class TestColdStartWarmUp:
+    def test_seed_cold_start_returns_global_priors(self):
+        """After seeding, load_source_reliability returns known prior values."""
+        vs = PineconeVectorStore()
+        mem = MemoryManagerAgent(vs)
+        entity = "BrandNewEntityXYZ"
+        mem.seed_cold_start(entity, ["opensanctions", "newsapi"])
+        reliability = mem.load_source_reliability(entity)
+        assert "opensanctions" in reliability
+        assert 0.65 < reliability["opensanctions"] < 0.95
+        assert "newsapi" in reliability
+        assert 0.50 < reliability["newsapi"] < 0.80
+
+    def test_unknown_entity_falls_back_to_global_priors(self):
+        """An entity with no calibration data at all gets global priors, not empty dict."""
+        vs = PineconeVectorStore()
+        mem = MemoryManagerAgent(vs)
+        reliability = mem.load_source_reliability("TotallyUnknownEntity999")
+        assert len(reliability) > 0
+        assert "opensanctions" in reliability
+        assert reliability["opensanctions"] > 0.5
+
+    def test_seed_cold_start_is_idempotent(self):
+        """Calling seed_cold_start twice does not double-count the priors."""
+        vs = PineconeVectorStore()
+        mem = MemoryManagerAgent(vs)
+        entity = "IdempotentCo"
+        mem.seed_cold_start(entity, ["opensanctions"])
+        r1 = mem.load_source_reliability(entity).get("opensanctions")
+        mem.seed_cold_start(entity, ["opensanctions"])
+        r2 = mem.load_source_reliability(entity).get("opensanctions")
+        assert r1 == r2
+
+
+# ── sparsity dampener and score stability ─────────────────────────────────────
+
+class TestScoringConsistency:
+    def test_sparsity_dampener_single_cold_start(self):
+        from app.policy import sparsity_dampener
+        assert sparsity_dampener(1, cold_start=True) == pytest.approx(0.68)
+
+    def test_sparsity_dampener_single_warm(self):
+        from app.policy import sparsity_dampener
+        assert sparsity_dampener(1, cold_start=False) == pytest.approx(0.80)
+
+    def test_sparsity_dampener_multi_source_no_dampening(self):
+        from app.policy import sparsity_dampener
+        assert sparsity_dampener(3, cold_start=True) == pytest.approx(1.0)
+        assert sparsity_dampener(5, cold_start=False) == pytest.approx(1.0)
+
+    def test_score_bounds_produce_valid_spread(self):
+        from app.policy import score_bounds
+        vec = CriticScoreVector(
+            authority=0.7, recency=0.8, entity_certainty=0.75,
+            corroboration=0.5, temporal_coherence=0.65,
+            contradiction_penalty=0.2, evidence_sufficiency_penalty=0.3,
+        )
+        pess, opt = score_bounds(vec)
+        assert 0.0 <= pess <= opt <= 1.0
+        assert (opt - pess) < 0.15
+
+    def test_single_source_cold_start_scores_below_medium_threshold(self):
+        """Single high-authority source under cold-start must not reach MEDIUM (>=0.62)."""
+        from app.policy import composite_score, sparsity_dampener
+        vec = CriticScoreVector(
+            authority=1.0, recency=1.0, entity_certainty=0.95,
+            corroboration=0.33,
+            temporal_coherence=0.55,
+            contradiction_penalty=0.0,
+            evidence_sufficiency_penalty=0.5,
+        )
+        raw = composite_score(vec)
+        damped = raw * sparsity_dampener(1, cold_start=True)
+        assert damped < 0.62, f"Expected damped score < 0.62 but got {damped:.4f}"
+
+    def test_two_corroborating_sources_higher_than_one(self):
+        """Two sources agreeing produces a higher damped score than one."""
+        from app.policy import composite_score, sparsity_dampener
+        single_vec = CriticScoreVector(
+            authority=0.8, recency=0.9, entity_certainty=0.85,
+            corroboration=0.33, temporal_coherence=0.65,
+            contradiction_penalty=0.0, evidence_sufficiency_penalty=0.35,
+        )
+        double_vec = single_vec.model_copy(update={"corroboration": 0.67, "evidence_sufficiency_penalty": 0.1})
+        score_single = composite_score(single_vec) * sparsity_dampener(1, cold_start=False)
+        score_double = composite_score(double_vec) * sparsity_dampener(2, cold_start=False)
+        assert score_double > score_single
+
+    def test_conflict_resolution_cold_start_forces_manual_review(self):
+        """Cold-start single-source conflict must trigger manual review."""
+        agent = ConflictResolutionAgent()
+        ev = [
+            _ev("x1", RiskDimension.SANCTIONS, "sanctions_status", "not_sanctioned", "SourceA", "official"),
+            _ev("x2", RiskDimension.SANCTIONS, "sanctions_status", "reported_sanctioned", "SourceB", "tier1_news"),
+        ]
+        result = agent.resolve(ev, historical_facts=[], source_reliability={})
+        assert result.requires_manual_review
+
+    def test_score_bounds_spread_is_non_negative(self):
+        from app.policy import score_bounds
+        vec = CriticScoreVector(
+            authority=0.9, recency=0.9, entity_certainty=0.5,
+            corroboration=0.33, temporal_coherence=0.55,
+            contradiction_penalty=0.2, evidence_sufficiency_penalty=0.5,
+        )
+        pess, opt = score_bounds(vec)
+        assert opt >= pess
+        assert (opt - pess) >= 0.0
 

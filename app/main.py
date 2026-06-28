@@ -2,6 +2,13 @@
 
 import os
 
+# Load .env before anything else so all env vars are available at import time
+try:
+    from dotenv import load_dotenv
+    load_dotenv(override=False)  # override=False: real env vars take precedence
+except ImportError:
+    pass
+
 from fastapi import FastAPI
 
 from app.agents.analysis_forecasting import AnalysisForecastingAgent
@@ -48,7 +55,7 @@ def create_app() -> FastAPI:
     embedding_model = EmbeddingFactory.create(os.getenv("EMBEDDING_TYPE", "openai"))
     vector_store = build_vector_store(embedding_fn=embedding_model.embed_sync)
 
-    memory_agent = MemoryManagerAgent(vector_store)
+    memory_agent = MemoryManagerAgent(vector_store, llm_client=llm_client)
 
     orchestrator = OrchestratorAgent(
         retrieval=RetrievalAgent(live_connector=connectors),

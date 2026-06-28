@@ -149,6 +149,10 @@ class OpenSanctionsConnector(BaseConnector):
                             "datasets": datasets,
                             "match_score": str(score),
                         },
+                        raw_content=(
+                            f"{caption} appears on sanctions lists: {datasets}. "
+                            f"Match confidence: {score:.0%}."
+                        ),
                     ))
             else:
                 evidence.append(EvidenceItem(
@@ -217,6 +221,10 @@ class SECConnector(BaseConnector):
                         source_confidence=self.source_confidence,
                         provenance_url=f"https://efts.sec.gov/LATEST/search-index?q=%22{entity_name}%22",
                         metadata={"filings_count": str(total)},
+                        raw_content=(
+                            f"{entity_name} has {total} SEC EDGAR filings (10-K, 8-K, DEF 14A) "
+                            f"on record, indicating an active regulatory disclosure history."
+                        ),
                     ))
                 else:
                     evidence.append(EvidenceItem(
@@ -292,7 +300,11 @@ class NewsConnector(BaseConnector):
                             metadata={
                                 "title": article.get("title", ""),
                                 "description": article.get("description", "")[:200],
-                            }
+                            },
+                            raw_content=(
+                                f"{article.get('title', '')}. "
+                                f"{article.get('description', '')}"
+                            ).strip() or None,
                         ))
         except Exception as e:
             logger.error(f"News connector error: {e}")
