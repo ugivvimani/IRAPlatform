@@ -3,14 +3,13 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from app.api.deps import get_connectors, get_embedding_model
-from app.core.security import User, get_authenticated_user
+from app.core.security import require_api_key
 
-router = APIRouter(prefix="/debug", tags=["debug"])
+router = APIRouter(prefix="/debug", tags=["debug"], dependencies=[Depends(require_api_key)])
 
 
 @router.get("/connectors/{entity_name}")
-async def debug_connectors(entity_name: str, user: User = Depends(get_authenticated_user), connectors=Depends(get_connectors)) -> dict:
-    del user
+async def debug_connectors(entity_name: str, connectors=Depends(get_connectors)) -> dict:
     evidence = await connectors.fetch_all(entity_name)
     return {
         "entity": entity_name,
@@ -28,8 +27,7 @@ async def debug_connectors(entity_name: str, user: User = Depends(get_authentica
 
 
 @router.post("/embed")
-async def debug_embed(texts: list[str], user: User = Depends(get_authenticated_user), embedding_model=Depends(get_embedding_model)) -> dict:
-    del user
+async def debug_embed(texts: list[str], embedding_model=Depends(get_embedding_model)) -> dict:
     embeddings = embedding_model.embed_sync(texts)
     return {
         "texts": texts,

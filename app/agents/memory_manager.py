@@ -4,7 +4,7 @@ import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from app.contracts import CalibrationRecord, EvidenceItem, MemoryFact, UserQuery
+from app.contracts import CalibrationRecord, EvidenceItem, MemoryFact, RiskDimension, UserQuery
 from app.vector_store.base import VectorDocument, VectorStoreRepository
 
 if TYPE_CHECKING:
@@ -52,12 +52,18 @@ class MemoryManagerAgent:
         )
         facts: list[MemoryFact] = []
         for doc in docs:
+            # dimension is stored as a string value (e.g. "sanctions"); coerce safely
+            raw_dim = doc.metadata.get("dimension", "reputational")
+            try:
+                dimension = RiskDimension(raw_dim)
+            except ValueError:
+                dimension = RiskDimension.REPUTATIONAL
             facts.append(
                 MemoryFact(
                     fact_id=doc.doc_id,
                     entity_id=entity_id,
                     summary=doc.text,
-                    dimension=doc.metadata.get("dimension", "reputational"),
+                    dimension=dimension,
                     severity=float(doc.metadata.get("severity", 0.5)),
                     source_reference=doc.metadata.get("source_reference", "memory"),
                     timestamp=datetime.fromisoformat(doc.metadata.get("timestamp", "2026-01-01T00:00:00+00:00")),

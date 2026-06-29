@@ -129,25 +129,105 @@ The server starts on `http://localhost:8000`. API docs at `http://localhost:8000
 | `NEWS_API_KEY` | NewsAPI key for reputational signal connector |
 | `OPENSANCTIONS_API_KEY` | OpenSanctions API key |
 | `SEC_CONTACT_EMAIL` | Required User-Agent contact for SEC EDGAR requests |
-| `ENABLE_API_KEY_AUTH` | `true` to require `X-API-Key` header |
-| `ENABLE_JWT_AUTH` | `true` to require JWT bearer token |
+| `SERVICE_API_KEY` | Shared API key required in `X-API-Key` header; unset = open (local dev) |
 | `APPLICATIONINSIGHTS_CONNECTION_STRING` | Optional — enables Azure Monitor telemetry |
 
 ---
 
 ## API Endpoints
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/health` | Liveness check |
-| `GET` | `/ready` | Readiness check (probes DB + vector store) |
-| `POST` | `/assess` | Synchronous company assessment |
-| `POST` | `/assess/async` | Queue an assessment job |
-| `GET` | `/tasks/{task_id}` | Poll async job status and result |
-| `POST` | `/watchlist` | Add entity to monitoring watchlist |
-| `GET` | `/watchlist` | List all watchlist entities |
-| `GET` | `/watchlist/{entity_id}` | Get cached assessment (`?refresh=true` to re-assess) |
-| `GET` | `/assessments/{entity_id}` | Assessment history for an entity |
+Base URL: `http://localhost:8000`  
+Interactive docs: `http://localhost:8000/api/docs`
+
+### Health
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/health` | None | Liveness check — returns env, LLM backend, storage backend |
+| `GET` | `/ready` | None | Readiness probe — tests vector store and DB connectivity |
+
+### Authentication
+
+All endpoints (except `/health` and `/ready`) require the `X-API-Key` header.
+
+Set `SERVICE_API_KEY` in your environment:
+```
+SERVICE_API_KEY=your-secret-key
+```
+
+The upstream integrity platform includes this header on every request:
+```
+X-API-Key: your-secret-key
+```
+
+If `SERVICE_API_KEY` is not set the service runs open — useful for local development and testing.
+
+**`POST /auth/token` has been removed.** JWT and role-based access control are not used; this is an internal service-to-service API.
+
+### Assessments
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `POST` | `/assess` | write | Synchronous company risk assessment |
+| `POST` | `/assess/async` | write | Queue an async assessment job (returns `task_id`) |
+| `GET` | `/tasks/{task_id}` | read | Poll async job status and retrieve result |
+| `GET` | `/assessments/{entity_id}` | read | Assessment history for an entity (`?limit=25`) |
+
+**`POST /assess` request body:**
+```json
+{
+  "query": {
+    "company_name": "Tesla Inc",
+    "question": "Is Tesla safe to partner with?",
+    "requested_dimensions": []
+  }
+}
+```
+
+**`POST /assess` query params:**
+- `include_details=true` — returns full `AssessmentResponse` (evidence chain, conflict result, telemetry); default returns compact summary
+
+**Compact response:**
+```json
+{
+  "assessment_id": 1,
+  "company_name": "Tesla Inc",
+  "risk_rating": "watch",
+  "confidence": "medium",
+  "summary": "...",
+  "recommended_next_steps": ["..."],
+  "requires_manual_review": true,
+  "evaluated_at": "2026-06-28T22:00:00Z"
+}
+```
+
+**Risk ratings:** `safe` | `watch` | `high_risk` | `restricted`  
+**Confidence levels:** `low` | `medium` | `high`
+
+### Watchlist
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `POST` | `/watchlist` | write | Add or update an entity on the monitoring watchlist |
+| `GET` | `/watchlist` | read | List all watchlist entities |
+| `GET` | `/watchlist/{entity_id}` | read | Get last assessment for entity; `?refresh=true` triggers new live assessment |
+| `DELETE` | `/watchlist/{entity_id}` | write | Remove entity from watchlist |
+
+### Policies
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/policies/active` | read | Get all active policy thresholds applied to each assessment |
+| `PUT` | `/policies/{policy_key}` | admin | Create or update a policy threshold |
+
+**Example policy threshold:**
+```json
+{
+  "threshold_value": 0.75,
+  "description": "Minimum score before auto-HOLD decision",
+  "is_active": true
+}
+```
 
 ---
 

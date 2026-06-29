@@ -69,13 +69,35 @@ class PineconeVectorStore(VectorStoreRepository):
                     "id": doc.doc_id,
                     "values": self._embed(doc.text),
                     # Store text in metadata so it can be retrieved on query
-                    "metadata": {**doc.metadata, "_text": doc.text},
+                    "metadata": self._sanitize_metadata({**doc.metadata, "_text": doc.text}),
                 }
                 for doc in docs
             ]
             self._index.upsert(vectors=vectors, namespace=self._ns(namespace))
         except Exception:
             self._mem_upsert(namespace, docs)
+
+    @staticmethod
+    def _sanitize_metadata(meta: dict[str, Any]) -> dict[str, Any]:
+        """
+        Pinecone metadata values must be str, int/float, bool, or list[str].
+        Strip None values and convert any unsupported types to str.
+        """
+        clean: dict[str, Any] = {}
+        for k, v in meta.items():
+            if v is None:
+                continue
+            if isinstance(v, bool):
+                # bools are valid but some SDK versions serialize them incorrectly;
+                # convert to int (0/1) for maximum compatibility.
+                clean[k] = int(v)
+            elif isinstance(v, (str, int, float)):
+                clean[k] = v
+            elif isinstance(v, list):
+                clean[k] = [str(i) for i in v]
+            else:
+                clean[k] = str(v)
+        return clean
 
     def _sdk_query(
         self,
