@@ -43,3 +43,11 @@ class StorageRepository(ABC):
     @abstractmethod
     def get_active_policy_thresholds(self) -> dict[str, PolicyThresholdRecord]:
         raise NotImplementedError
+
+    @abstractmethod
+    def upsert_async_job(self, job_id: str, status: str, assessment_id: int | None, entity_id: str) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_async_job(self, job_id: str) -> dict | None:
+        raise NotImplementedError
