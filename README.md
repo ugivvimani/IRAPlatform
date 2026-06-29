@@ -119,7 +119,7 @@ The server starts on `http://localhost:8000`. API docs at `http://localhost:8000
 | `LLM_PROVIDER` | `openrouter` (default) \| `openai` \| `azure_openai` \| `stub` |
 | `OPENROUTER_API_KEY` | OpenRouter API key (used for both LLM and embeddings) |
 | `LLM_MODEL` | LLM model name (default: `openai/gpt-4o-mini`) |
-| `EMBEDDING_TYPE` | `openai` (default) \| `local` |
+| `EMBEDDING_TYPE` | `openrouter` (default) \| `openai` \| `local` |
 | `PINECONE_API_KEY` | Pinecone API key |
 | `PINECONE_INDEX` | Pinecone index name (default: `ira-platform-memory`) |
 | `ENABLE_LIVE_CONNECTORS` | `true` to call live APIs; `false` uses mocks (default) |

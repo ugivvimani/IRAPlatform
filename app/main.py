@@ -51,7 +51,7 @@ def create_app() -> FastAPI:
     connectors = MultiSourceConnector(ConnectorConfig())
 
     # Build embedding model and wire it as the vector store embedding function
-    embedding_model = EmbeddingFactory.create(os.getenv("EMBEDDING_TYPE", "openai"))
+    embedding_model = EmbeddingFactory.create(os.getenv("EMBEDDING_TYPE", "openrouter"))
     vector_store = build_vector_store(embedding_fn=embedding_model.embed_sync)
 
     memory_agent = MemoryManagerAgent(vector_store, llm_client=llm_client)
