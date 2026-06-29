@@ -8,8 +8,37 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from dotenv import load_dotenv
+load_dotenv(dotenv_path=ROOT / ".env")
+
 from app.contracts import AssessRequest, EvidenceItem, RiskDimension, UserQuery
-from app.main import memory_agent, orchestrator
+from app.services.embeddings import EmbeddingFactory
+from app.vector_store.pinecone_store import PineconeVectorStore
+from app.agents.memory_manager import MemoryManagerAgent
+from app.agents.analysis_forecasting import AnalysisForecastingAgent
+from app.agents.calibration import CalibrationAgent
+from app.agents.conflict_resolution import ConflictResolutionAgent
+from app.agents.output_composer import OutputComposerAgent
+from app.agents.retrieval import RetrievalAgent
+from app.llm.factory import build_llm_client
+from app.services.orchestrator import OrchestratorAgent
+
+import os
+
+def _build_orchestrator():
+    llm_client = build_llm_client()
+    embedding_model = EmbeddingFactory.create(os.getenv("EMBEDDING_TYPE", "openrouter"))
+    vector_store = PineconeVectorStore(embedding_fn=embedding_model.embed_sync)
+    memory_agent = MemoryManagerAgent(vector_store, llm_client=llm_client)
+    return OrchestratorAgent(
+        retrieval=RetrievalAgent(),
+        analysis=AnalysisForecastingAgent(),
+        conflict=ConflictResolutionAgent(),
+        memory=memory_agent,
+        composer=OutputComposerAgent(),
+        calibration=CalibrationAgent(),
+        llm_client=llm_client,
+    ), memory_agent
 
 
 def _evidence(
@@ -37,6 +66,7 @@ def _evidence(
 
 
 def run() -> int:
+    orchestrator, memory_agent = _build_orchestrator()
     failures: list[str] = []
 
     # 1) Cold-start conflict should force manual review.

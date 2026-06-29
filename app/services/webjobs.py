@@ -28,8 +28,8 @@ def _utc_now() -> str:
 def init_local_worker(orchestrator: "OrchestratorAgent") -> None:
     """Call once at startup (local mode only) to start the background task worker."""
     global _orchestrator_ref, _worker_started
-    _orchestrator_ref = orchestrator
     with _worker_lock:
+        _orchestrator_ref = orchestrator
         if not _worker_started:
             t = threading.Thread(target=_worker_loop, daemon=True, name="webjobs-worker")
             t.start()

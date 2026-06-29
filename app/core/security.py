@@ -233,7 +233,7 @@ class JWTAuthenticator:
         return User(
             user_id=token_data.sub,
             role=token_data.role,
-            permissions=["read", "write"] if token_data.role == "analyst" else ["read"],
+            permissions=RBACEnforcer.ROLE_PERMISSIONS.get(token_data.role, ["read"]),
         )
 
 
