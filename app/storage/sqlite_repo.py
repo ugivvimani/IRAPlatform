@@ -72,6 +72,18 @@ class SQLiteRepository(StorageRepository):
                 ON policy_thresholds (policy_key, is_active)
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS async_jobs (
+                    job_id TEXT PRIMARY KEY,
+                    status TEXT NOT NULL DEFAULT 'queued',
+                    entity_id TEXT NOT NULL,
+                    assessment_id INTEGER,
+                    created_at TEXT NOT NULL,
+                    completed_at TEXT
+                )
+                """
+            )
 
     def upsert_watchlist(self, entry: WatchlistEntry) -> WatchlistEntry:
         with self._connect() as conn:
@@ -248,4 +260,43 @@ class SQLiteRepository(StorageRepository):
                 updated_at=datetime.fromisoformat(row["updated_at"]),
             )
             for row in rows
+        }
+
+    def upsert_async_job(
+        self,
+        job_id: str,
+        status: str,
+        assessment_id: int | None,
+        entity_id: str,
+    ) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        completed_at = now if status in ("completed", "failed") else None
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO async_jobs (job_id, status, entity_id, assessment_id, created_at, completed_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(job_id) DO UPDATE SET
+                    status=excluded.status,
+                    assessment_id=COALESCE(excluded.assessment_id, async_jobs.assessment_id),
+                    completed_at=COALESCE(excluded.completed_at, async_jobs.completed_at)
+                """,
+                (job_id, status, entity_id, assessment_id, now, completed_at),
+            )
+
+    def get_async_job(self, job_id: str) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT job_id, status, entity_id, assessment_id, created_at, completed_at FROM async_jobs WHERE job_id = ?",
+                (job_id,),
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            "job_id": row["job_id"],
+            "status": row["status"],
+            "entity_id": row["entity_id"],
+            "assessment_id": row["assessment_id"],
+            "created_at": row["created_at"],
+            "completed_at": row["completed_at"],
         }

@@ -58,13 +58,17 @@ async def assess(
 
 @router.post("/assess/async", response_model=AsyncTaskResponse, status_code=202)
 async def assess_async(request: AsyncAssessRequest = Body(...)) -> AsyncTaskResponse:
-    task_id = enqueue_assessment_job(request.company_name, request.question)
-    return AsyncTaskResponse(task_id=task_id, status="queued")
+    task_id = enqueue_assessment_job(
+        request.company_name,
+        request.question,
+        callback_url=request.callback_url,
+    )
+    return AsyncTaskResponse(task_id=task_id, status="queued", callback_url=request.callback_url)
 
 
 @router.get("/tasks/{task_id}")
-async def task_status(task_id: str) -> dict:
-    return get_job_status(task_id)
+async def task_status(task_id: str, storage_repo=Depends(get_storage_repo)) -> dict:
+    return get_job_status(task_id, storage_repo=storage_repo)
 
 
 @router.get("/assessments/{entity_id}", response_model=list[AssessmentAuditRecord])

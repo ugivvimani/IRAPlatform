@@ -70,6 +70,18 @@ class PostgresRepository(StorageRepository):
                     ON policy_thresholds (policy_key, is_active)
                     """
                 )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS async_jobs (
+                        job_id TEXT PRIMARY KEY,
+                        status TEXT NOT NULL DEFAULT 'queued',
+                        entity_id TEXT NOT NULL,
+                        assessment_id BIGINT,
+                        created_at TIMESTAMPTZ NOT NULL,
+                        completed_at TIMESTAMPTZ
+                    )
+                    """
+                )
             conn.commit()
 
     def upsert_watchlist(self, entry: WatchlistEntry) -> WatchlistEntry:
@@ -248,4 +260,47 @@ class PostgresRepository(StorageRepository):
                 updated_at=row[7],
             )
             for row in rows
+        }
+
+    def upsert_async_job(
+        self,
+        job_id: str,
+        status: str,
+        assessment_id: int | None,
+        entity_id: str,
+    ) -> None:
+        now = datetime.now(timezone.utc)
+        completed_at = now if status in ("completed", "failed") else None
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO async_jobs (job_id, status, entity_id, assessment_id, created_at, completed_at)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (job_id) DO UPDATE SET
+                        status = EXCLUDED.status,
+                        assessment_id = COALESCE(EXCLUDED.assessment_id, async_jobs.assessment_id),
+                        completed_at = COALESCE(EXCLUDED.completed_at, async_jobs.completed_at)
+                    """,
+                    (job_id, status, entity_id, assessment_id, now, completed_at),
+                )
+            conn.commit()
+
+    def get_async_job(self, job_id: str) -> dict | None:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT job_id, status, entity_id, assessment_id, created_at, completed_at FROM async_jobs WHERE job_id = %s",
+                    (job_id,),
+                )
+                row = cur.fetchone()
+        if not row:
+            return None
+        return {
+            "job_id": row[0],
+            "status": row[1],
+            "entity_id": row[2],
+            "assessment_id": row[3],
+            "created_at": row[4].isoformat() if hasattr(row[4], "isoformat") else str(row[4]),
+            "completed_at": row[5].isoformat() if row[5] and hasattr(row[5], "isoformat") else str(row[5]) if row[5] else None,
         }

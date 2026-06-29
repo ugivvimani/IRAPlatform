@@ -80,7 +80,7 @@ def create_app() -> FastAPI:
 
     # Start local background worker so /assess/async jobs are actually executed
     if not os.getenv("AZURE_STORAGE_CONNECTION_STRING"):
-        init_local_worker(orchestrator)
+        init_local_worker(orchestrator, storage_repo=storage_repo)
 
     app.include_router(health_router)
     app.include_router(assessments_router)
