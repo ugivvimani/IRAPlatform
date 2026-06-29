@@ -119,7 +119,7 @@ The server starts on `http://localhost:8000`. API docs at `http://localhost:8000
 | `LLM_PROVIDER` | `openrouter` (default) \| `openai` \| `azure_openai` \| `stub` |
 | `OPENROUTER_API_KEY` | OpenRouter API key (used for both LLM and embeddings) |
 | `LLM_MODEL` | LLM model name (default: `openai/gpt-4o-mini`) |
-| `EMBEDDING_TYPE` | `openrouter` (default) \| `openai` \| `local` |
+| `EMBEDDING_TYPE` | `openai` (default) \| `local` |
 | `PINECONE_API_KEY` | Pinecone API key |
 | `PINECONE_INDEX` | Pinecone index name (default: `ira-platform-memory`) |
 | `ENABLE_LIVE_CONNECTORS` | `true` to call live APIs; `false` uses mocks (default) |
@@ -168,10 +168,10 @@ If `SERVICE_API_KEY` is not set the service runs open — useful for local devel
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| `POST` | `/assess` | write | Synchronous company risk assessment |
-| `POST` | `/assess/async` | write | Queue an async assessment job (returns `task_id`) |
-| `GET` | `/tasks/{task_id}` | read | Poll async job status and retrieve result |
-| `GET` | `/assessments/{entity_id}` | read | Assessment history for an entity (`?limit=25`) |
+| `POST` | `/assess` | API Key | Synchronous company risk assessment |
+| `POST` | `/assess/async` | API Key | Queue an async assessment job (returns `task_id`) |
+| `GET` | `/tasks/{task_id}` | API Key | Poll async job status and retrieve result |
+| `GET` | `/assessments/{entity_id}` | API Key | Assessment history for an entity (`?limit=25`) |
 
 **`POST /assess` request body:**
 ```json
@@ -184,8 +184,16 @@ If `SERVICE_API_KEY` is not set the service runs open — useful for local devel
 }
 ```
 
-**`POST /assess` query params:**
-- `include_details=true` — returns full `AssessmentResponse` (evidence chain, conflict result, telemetry); default returns compact summary
+**`POST /assess/async` request body:**
+```json
+{
+  "company_name": "Tesla Inc",
+  "question": "Is Tesla safe to partner with?",
+  "callback_url": "https://your-app.com/webhooks/ira"
+}
+```
+
+`callback_url` is optional. When provided, the service POSTs the completed result to that URL once the job finishes.
 
 **Compact response:**
 ```json
@@ -201,6 +209,9 @@ If `SERVICE_API_KEY` is not set the service runs open — useful for local devel
 }
 ```
 
+**`POST /assess` query params:**
+- `include_details=true` — returns full `AssessmentResponse` (evidence chain, conflict result, telemetry); default returns compact summary
+
 **Risk ratings:** `safe` | `watch` | `high_risk` | `restricted`  
 **Confidence levels:** `low` | `medium` | `high`
 
@@ -208,17 +219,17 @@ If `SERVICE_API_KEY` is not set the service runs open — useful for local devel
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| `POST` | `/watchlist` | write | Add or update an entity on the monitoring watchlist |
-| `GET` | `/watchlist` | read | List all watchlist entities |
-| `GET` | `/watchlist/{entity_id}` | read | Get last assessment for entity; `?refresh=true` triggers new live assessment |
-| `DELETE` | `/watchlist/{entity_id}` | write | Remove entity from watchlist |
+| `POST` | `/watchlist` | API Key | Add or update an entity on the monitoring watchlist |
+| `GET` | `/watchlist` | API Key | List all watchlist entities |
+| `GET` | `/watchlist/{entity_id}` | API Key | Get last assessment for entity; `?refresh=true` triggers new live assessment |
+| `DELETE` | `/watchlist/{entity_id}` | API Key | Remove entity from watchlist |
 
 ### Policies
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| `GET` | `/policies/active` | read | Get all active policy thresholds applied to each assessment |
-| `PUT` | `/policies/{policy_key}` | admin | Create or update a policy threshold |
+| `GET` | `/policies/active` | API Key | Get all active policy thresholds applied to each assessment |
+| `PUT` | `/policies/{policy_key}` | API Key | Create or update a policy threshold |
 
 **Example policy threshold:**
 ```json
@@ -242,24 +253,60 @@ If `SERVICE_API_KEY` is not set the service runs open — useful for local devel
 
 ## Azure Deployment
 
-```
-GitHub Actions → Azure Container Registry → Azure App Service
+Deployment is done **locally via Azure CLI** — no deployment secrets are stored in this repository.
+
+```powershell
+# One-time: install Azure CLI
+winget install --id Microsoft.AzureCLI
+
+# Authenticate
+az login
+
+# First deploy (creates App Service + sets all secrets + deploys code)
+cd C:\Users\<you>\ira-deploy
+.\deploy.ps1 -Create
+
+# Re-deploy after code changes
+.\deploy.ps1
 ```
 
-Workflow file: `.github/workflows/ci-cd.yml`
+The deploy script lives **outside the repo** (`~\ira-deploy\deploy.ps1`) and contains all secrets and infra names. It is never committed.
 
-Required GitHub secrets/variables:
-- `vars.AZURE_WEBAPP_NAME`
-- `vars.AZURE_RESOURCE_GROUP`
-- `vars.AZURE_CONTAINER_REGISTRY`
-- `secrets.AZURE_CREDENTIALS`
+### What the script does
+
+1. Creates a **Linux App Service** (Python 3.11, B1/P0v3 SKU)
+2. Sets all environment variables via `az webapp config appsettings set` — secrets stay in Azure Configuration, not in any file
+3. Packages the code (zip, excluding `.venv`, `.env`, tests, local data)
+4. Deploys via `az webapp deploy --src-path app.zip`
+
+### Startup command
+
+Azure App Service uses this command to start the app (set under **Configuration → General settings**):
+
+```
+gunicorn -w 2 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8000 app.main:app
+```
+
+### Required Azure resources
+
+| Resource | Purpose |
+|---|---|
+| App Service Plan (B1 or P0v3, Linux) | Compute for the API |
+| App Service (Python 3.11) | Hosts the FastAPI app |
+| Azure Storage Account *(optional)* | Enables Azure Storage Queue for async jobs in production |
+
+### GitHub Actions
+
+The workflow in `.github/workflows/ci-cd.yml` runs **tests only** on push/PR. It does not deploy. No Azure credentials are stored in GitHub secrets.
 
 ### Background Workers
 
 | Script | Trigger | Purpose |
 |---|---|---|
-| `webjobs/continuous/run.py` | Azure Storage Queue | Drains async assessment jobs |
-| `webjobs/scheduled/run.py` | Cron schedule | Re-assesses all watchlist entities |
+| `webjobs/continuous/run.py` | Azure Storage Queue | Drains async assessment jobs in production |
+| `webjobs/scheduled/run.py` | Cron / timer trigger | Re-assesses all watchlist entities on a schedule |
+
+In local/demo mode the background worker runs as an in-process thread — no Azure Storage Queue is required.
 
 ---
 
