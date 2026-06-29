@@ -19,7 +19,6 @@ from app.agents.output_composer import OutputComposerAgent
 from app.agents.retrieval import RetrievalAgent
 from app.api.deps import AppState
 from app.api.routers.assessments import router as assessments_router
-from app.api.routers.auth import router as auth_router
 from app.api.routers.health import router as health_router
 from app.api.routers.policies import router as policies_router
 from app.api.routers.watchlist import router as watchlist_router
@@ -84,7 +83,6 @@ def create_app() -> FastAPI:
         init_local_worker(orchestrator)
 
     app.include_router(health_router)
-    app.include_router(auth_router)
     app.include_router(assessments_router)
     app.include_router(watchlist_router)
     app.include_router(policies_router)
